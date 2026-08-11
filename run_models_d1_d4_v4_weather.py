@@ -63,9 +63,9 @@ def pick_csv(csvs, keys, exclude=()):
 
 
 # ---------- 날씨: 도시별 CSV → 4-city 평균 → 계절 기준선 → anomaly ----------
-def load_weather(csvs):
+def _weather_frame(csvs):
     """temp_mean_f 컬럼이 있는 CSV 를 전부 날씨로 인식(과거+예보 자동 합침).
-    반환: date, t_anom(평년比 편차,+더움), t_anom_abs, t_anom_max. 없으면 None."""
+    반환: date, temp_mean_f, (temp_max_f), doy. 없으면 None."""
     parts = []
     for f in csvs:
         try:
@@ -86,19 +86,45 @@ def load_weather(csvs):
     W = w.groupby("date").agg(agg).reset_index().sort_values("date")
     W = W.drop_duplicates(subset=["date"], keep="last")
     W["doy"] = W.date.dt.dayofyear
+    return W
 
-    def _norm(col):
-        b = W.groupby("doy")[col].mean()
-        bb = pd.concat([b, b, b])                       # 순환 스무딩(연말↔연초 연결)
-        s = bb.rolling(15, center=True, min_periods=1).mean().iloc[len(b):2 * len(b)]
-        s.index = b.index
-        return W.doy.map(s)
 
+def _doy_norm(W, col):
+    """day-of-year 별 계절 기준선(평년값). 인덱스=doy, 값=기온(F).
+    연말↔연초가 이어지도록 3배 복제 후 15일 스무딩."""
+    b = W.groupby("doy")[col].mean()
+    bb = pd.concat([b, b, b])
+    s = bb.rolling(15, center=True, min_periods=1).mean().iloc[len(b):2 * len(b)]
+    s.index = b.index
+    return s
+
+
+def weather_normals(csvs):
+    """예보일의 anomaly 를 계산하기 위한 평년값 표.
+
+    과거 CSV 에 없는 '미래 날짜'의 t_anom 을 서버가 직접 구할 수 있게 한다.
+    (예보 기온 − 그 날짜의 평년값). 없으면 None.
+    반환: {"mean": Series(doy→F), "max": Series(doy→F) 또는 None}
+    """
+    W = _weather_frame(csvs)
+    if W is None:
+        return None
+    return {"mean": _doy_norm(W, "temp_mean_f"),
+            "max": _doy_norm(W, "temp_max_f") if "temp_max_f" in W.columns else None}
+
+
+def load_weather(csvs):
+    """날씨 CSV → 날짜별 기온 anomaly.
+    반환: date, t_anom(평년比 편차,+더움), t_anom_abs, t_anom_max. 없으면 None."""
+    W = _weather_frame(csvs)
+    if W is None:
+        return None
     # 계절 기준선(day-of-year 평균 + 15일 스무딩) 대비 편차.
     # 절대기온은 계절을 무시해 "7월 89F(평범)"과 "1월 89F(이상)"를 구분 못한다.
-    W["t_anom"] = W.temp_mean_f - _norm("temp_mean_f")
+    W["t_anom"] = W.temp_mean_f - W.doy.map(_doy_norm(W, "temp_mean_f"))
     W["t_anom_abs"] = W.t_anom.abs()
-    W["t_anom_max"] = (W.temp_max_f - _norm("temp_max_f")) if "temp_max_f" in W.columns else np.nan
+    W["t_anom_max"] = (W.temp_max_f - W.doy.map(_doy_norm(W, "temp_max_f"))
+                       if "temp_max_f" in W.columns else np.nan)
     return W[["date", "t_anom", "t_anom_abs", "t_anom_max"]]
 
 
@@ -349,6 +375,25 @@ def forecast_daily(fc):
 def clip01(x): return float(np.clip(x, 0, 1))
 
 
+def regime_from_last(d):
+    """마지막 실측일(D0)의 행에서 예보용 regime 피처를 만든다. run() 과 app.py 공용.
+
+    주의 — lag1 계열은 패널의 `*_lag1` 컬럼이 아니라 D0 의 '당일값'을 써야 한다.
+    패널에서 basis_lag1[t] = basis_mean[t-1] 이므로, 타깃 D0+1 에 대한 basis_lag1 은
+    basis_mean[D0] 이다. `last.basis_lag1` 을 쓰면 basis_mean[D0-1] 이 되어 하루 더 낡는다.
+    (예전에 run() 은 낡은 값, app.py 는 올바른 값을 써서 같은 데이터로 다른 배분이 나왔다.)
+    반환: forecast_rows() 가 기대하는 regime dict
+    """
+    last = d.dropna(subset=["da_med"]).iloc[-1]
+    f = lambda c: float(last[c])
+    return dict(prc_low_r7=f("prc_low_r7"), da_med=f("da_med"),
+                basis_lag1=f("basis_mean"), basis_r7=f("basis_r7"),
+                prem_rate_r7=f("prem_rate_r7"),
+                gas_lag1=f("gas"), gas_r7=f("gas_r7"),
+                nfe_lag1=f("nfe"), nfe_r7=f("nfe_r7"),
+                DA_r3=f("DA_r3"), DA_r7=f("DA_r7"), DA_r14=f("DA_r14")), last["date"]
+
+
 def forecast_rows(fc, models, reg, volume_mw, use_gate=False):
     """예보 패널 → D+1..D+N 배분 행 리스트. run() 과 API 서버가 공유."""
     f1, mdl1 = models["m1"]; f2, mdl2 = models["m2"]; f4, mdl4 = models["m4"]
@@ -356,9 +401,13 @@ def forecast_rows(fc, models, reg, volume_mw, use_gate=False):
     rows = []
     for h, (_, r) in enumerate(fc.iterrows(), start=1):
         feat = dict(reg)
+        # t_anom* 는 M1F 피처다. 여기서 안 넘기면 아래 '누락 피처는 NaN' 에 걸려
+        # 학습 때는 쓰고 예측 때는 못 쓰는 상태가 된다(오버레이만 남고 피처는 죽음).
+        # HANDOFF 5항 기준 날씨는 오버레이보다 '피처' 쪽 기여가 크다.
         for c in ["fc_load_max", "fc_nl_mean", "fc_nl_max", "ren_mean", "ren_min",
-                  "ren_share", "month", "weekend"]:
-            feat[c] = r[c]
+                  "ren_share", "month", "weekend", "t_anom", "t_anom_abs", "t_anom_max"]:
+            if c in r:
+                feat[c] = r[c]
         if "gas_fc" in r and pd.notna(r["gas_fc"]):
             feat["gas_lag1"] = r["gas_fc"]; feat["gas_r7"] = r["gas_fc"]
         X = pd.DataFrame([feat])
@@ -449,11 +498,7 @@ def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False):
     for k, v in acc.items(): print(f"  {k:32s}: {v:.3f}")
 
     # 결정시점(D0) = 마지막 실측일. 그 시점의 최근 regime 값 사용.
-    reg_cols = ["nfe_lag1", "nfe_r7", "gas_lag1", "gas_r7", "DA_r3", "DA_r7", "DA_r14",
-                "da_med", "basis_lag1", "basis_r7", "prem_rate_r7", "prc_low_r7"]
-    last = d.dropna(subset=["da_med"]).iloc[-1]
-    reg = {c: last[c] for c in reg_cols}
-    d0 = last["date"]
+    reg, d0 = regime_from_last(d)
     print(f"\n결정시점 D0 = {d0.date()} | 최근 reserve regime prc_low_r7 = {reg['prc_low_r7']:.0f} MW")
     print(f"M3 Hard Gate: {'ON' if use_gate else 'OFF(기본)'}  "
           f"{'' if use_gate else '— 게이트 조건은 정보로만 표기, 배분 미적용'}")

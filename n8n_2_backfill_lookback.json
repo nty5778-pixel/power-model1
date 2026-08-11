@@ -3,27 +3,48 @@
   "nodes": [
     {
       "parameters": {
-        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 16 * * *" }] }
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 16 * * *"
+            }
+          ]
+        }
       },
       "id": "trg1",
       "name": "Cron Daily 11:00 CT",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-560, 200],
+      "position": [
+        -560,
+        200
+      ],
       "notes": "D+1 정산 확정 후 실적 backfill"
     },
     {
       "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "predictions",
+          "mode": "name"
+        },
         "options": {}
       },
       "id": "read1",
       "name": "Sheets: read predictions",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [-340, 200]
+      "position": [
+        -340,
+        200
+      ]
     },
     {
       "parameters": {
@@ -33,17 +54,28 @@
       "name": "Find Pending Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-120, 200]
+      "position": [
+        -120,
+        200
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "version": 2 },
-          "conditions": [{
-            "leftValue": "={{ $json.skip }}",
-            "rightValue": false,
-            "operator": { "type": "boolean", "operation": "false" }
-          }],
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ],
           "combinator": "and"
         },
         "options": {}
@@ -52,7 +84,10 @@
       "name": "Has Pending?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [100, 200]
+      "position": [
+        100,
+        200
+      ]
     },
     {
       "parameters": {
@@ -60,37 +95,62 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "date", "value": "={{ $json.target_date }}" },
-            { "name": "zone", "value": "LZ_HOUSTON" }
+            {
+              "name": "date",
+              "value": "={{ $json.target_date }}"
+            },
+            {
+              "name": "zone",
+              "value": "LZ_HOUSTON"
+            }
           ]
         },
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
       "id": "settle",
       "name": "Fetch Settlement DA/RT",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [320, 120],
+      "position": [
+        320,
+        120
+      ],
       "notes": "정산 소스는 authoritative 여야 함 — TimeSeriesExport 파생값 사용 금지"
     },
     {
       "parameters": {
-        "jsCode": "// 예측행 + 실적가격 결합 → 채점 필드 계산\nconst pred = $('Find Pending Rows').all().map(i => i.json);\nconst out = [];\nfor (let i = 0; i < pred.length; i++) {\n  const s = $input.all()[i]?.json ?? {};\n  const DA = Number(s.DA_avg ?? s.da ?? NaN);\n  const RT = Number(s.RT_avg ?? s.rt ?? NaN);\n  if (Number.isNaN(DA) || Number.isNaN(RT)) continue;\n  const f = Number(pred[i].DA_fraction);\n  const dart = RT - DA;\n  out.push({ json: {\n    ...pred[i],\n    DA_actual: DA.toFixed(2),\n    RT_actual: RT.toFixed(2),\n    DART_actual: dart.toFixed(2),\n    blended_cost: (f*DA + (1-f)*RT).toFixed(2),\n    hit: ((f > 0.5) === (dart > 0)) ? 'Y' : 'N'\n  }});\n}\nreturn out;"
+        "jsCode": "// 예측행 + 실적가격 결합 → 채점 필드 계산\nconst pred = $('Find Pending Rows').all().map(i => i.json);\nconst settle = $input.all();\nif (settle.length !== pred.length) {\n  throw new Error(`정산 응답 ${settle.length}건 != 대기 예측행 ${pred.length}건. 순서 매칭이 어긋나면 다른 날짜에 실적이 붙는다 — 중단합니다.`);\n}\nconst out = [];\nfor (let i = 0; i < pred.length; i++) {\n  const s = $input.all()[i]?.json ?? {};\n  const DA = Number(s.DA_avg ?? s.da ?? NaN);\n  const RT = Number(s.RT_avg ?? s.rt ?? NaN);\n  if (Number.isNaN(DA) || Number.isNaN(RT)) continue;\n  const f = Number(pred[i].DA_fraction);\n  const dart = RT - DA;\n  out.push({ json: {\n    ...pred[i],\n    DA_actual: DA.toFixed(2),\n    RT_actual: RT.toFixed(2),\n    DART_actual: dart.toFixed(2),\n    blended_cost: (f*DA + (1-f)*RT).toFixed(2),\n    hit: ((f > 0.5) === (dart > 0)) ? 'Y' : 'N'\n  }});\n}\nreturn out;"
       },
       "id": "join",
       "name": "Join & Score",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [540, 120]
+      "position": [
+        540,
+        120
+      ]
     },
     {
       "parameters": {
         "operation": "update",
-        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "predictions",
+          "mode": "name"
+        },
         "columns": {
           "mappingMode": "autoMapInputData",
-          "matchingColumns": ["run_id", "horizon"]
+          "matchingColumns": [
+            "run_id",
+            "horizon"
+          ]
         },
         "options": {}
       },
@@ -98,32 +158,55 @@
       "name": "Sheets: update actuals",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [760, 120],
+      "position": [
+        760,
+        120
+      ],
       "notes": "run_id + horizon 복합키로 매칭 — append 가 아니라 update"
     },
-
     {
       "parameters": {
-        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 17 * * 1" }] }
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 17 * * 1"
+            }
+          ]
+        }
       },
       "id": "trg2",
       "name": "Cron Weekly Mon 12:00 CT",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-560, 560]
+      "position": [
+        -560,
+        560
+      ]
     },
     {
       "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "predictions",
+          "mode": "name"
+        },
         "options": {}
       },
       "id": "read2",
       "name": "Sheets: read scored history",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [-340, 560]
+      "position": [
+        -340,
+        560
+      ]
     },
     {
       "parameters": {
@@ -133,7 +216,10 @@
       "name": "Prepare Score Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-120, 560]
+      "position": [
+        -120,
+        560
+      ]
     },
     {
       "parameters": {
@@ -141,18 +227,28 @@
         "url": "={{ $env.RENDER_URL }}/score",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "x-api-key", "value": "={{ $env.MODEL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.MODEL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
-        "options": { "timeout": 120000 }
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "score",
       "name": "Render /score",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [100, 560]
+      "position": [
+        100,
+        560
+      ]
     },
     {
       "parameters": {
@@ -162,7 +258,10 @@
       "name": "Compute Drift Metrics",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [320, 560]
+      "position": [
+        320,
+        560
+      ]
     },
     {
       "parameters": {
@@ -171,21 +270,35 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
-            { "name": "anthropic-version", "value": "2023-06-01" },
-            { "name": "content-type", "value": "application/json" }
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-6',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
       "id": "claude2",
       "name": "Claude API - Weekly Review",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [540, 560]
+      "position": [
+        540,
+        560
+      ]
     },
     {
       "parameters": {
@@ -195,37 +308,187 @@
       "name": "Parse Weekly Review",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [760, 560]
+      "position": [
+        760,
+        560
+      ]
     },
     {
       "parameters": {
         "operation": "append",
-        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "lookback", "mode": "name" },
-        "columns": { "mappingMode": "autoMapInputData", "matchingColumns": [] },
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "lookback",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": []
+        },
         "options": {}
       },
       "id": "sheet3",
       "name": "Sheets: lookback (append)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [980, 560]
+      "position": [
+        980,
+        560
+      ]
     }
   ],
   "connections": {
-    "Cron Daily 11:00 CT": { "main": [[{ "node": "Sheets: read predictions", "type": "main", "index": 0 }]] },
-    "Sheets: read predictions": { "main": [[{ "node": "Find Pending Rows", "type": "main", "index": 0 }]] },
-    "Find Pending Rows": { "main": [[{ "node": "Has Pending?", "type": "main", "index": 0 }]] },
-    "Has Pending?": { "main": [[{ "node": "Fetch Settlement DA/RT", "type": "main", "index": 0 }], []] },
-    "Fetch Settlement DA/RT": { "main": [[{ "node": "Join & Score", "type": "main", "index": 0 }]] },
-    "Join & Score": { "main": [[{ "node": "Sheets: update actuals", "type": "main", "index": 0 }]] },
-    "Cron Weekly Mon 12:00 CT": { "main": [[{ "node": "Sheets: read scored history", "type": "main", "index": 0 }]] },
-    "Sheets: read scored history": { "main": [[{ "node": "Prepare Score Payload", "type": "main", "index": 0 }]] },
-    "Prepare Score Payload": { "main": [[{ "node": "Render /score", "type": "main", "index": 0 }]] },
-    "Render /score": { "main": [[{ "node": "Compute Drift Metrics", "type": "main", "index": 0 }]] },
-    "Compute Drift Metrics": { "main": [[{ "node": "Claude API - Weekly Review", "type": "main", "index": 0 }]] },
-    "Claude API - Weekly Review": { "main": [[{ "node": "Parse Weekly Review", "type": "main", "index": 0 }]] },
-    "Parse Weekly Review": { "main": [[{ "node": "Sheets: lookback (append)", "type": "main", "index": 0 }]] }
+    "Cron Daily 11:00 CT": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read predictions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: read predictions": {
+      "main": [
+        [
+          {
+            "node": "Find Pending Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Pending Rows": {
+      "main": [
+        [
+          {
+            "node": "Has Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Settlement DA/RT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Fetch Settlement DA/RT": {
+      "main": [
+        [
+          {
+            "node": "Join & Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join & Score": {
+      "main": [
+        [
+          {
+            "node": "Sheets: update actuals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Weekly Mon 12:00 CT": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read scored history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: read scored history": {
+      "main": [
+        [
+          {
+            "node": "Prepare Score Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Score Payload": {
+      "main": [
+        [
+          {
+            "node": "Render /score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render /score": {
+      "main": [
+        [
+          {
+            "node": "Compute Drift Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Drift Metrics": {
+      "main": [
+        [
+          {
+            "node": "Claude API - Weekly Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API - Weekly Review": {
+      "main": [
+        [
+          {
+            "node": "Parse Weekly Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Weekly Review": {
+      "main": [
+        [
+          {
+            "node": "Sheets: lookback (append)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  }
 }

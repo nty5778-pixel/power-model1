@@ -38,8 +38,20 @@ class ForecastRow(BaseModel):
     fc_solar_mw: float
 
 
+class WeatherRow(BaseModel):
+    """예보일의 기온. 서버가 평년값과 비교해 t_anom 을 만든다.
+
+    이게 없으면 과거 날씨 CSV 에 있는 날짜만 t_anom 이 채워진다. 예보 대상은 항상 '미래'라
+    CSV 범위를 벗어나므로, 날씨 피처(M1)와 오버레이가 통째로 비활성화된다.
+    """
+    date: str                       # YYYY-MM-DD
+    temp_mean_f: float
+    temp_max_f: Optional[float] = None
+
+
 class PredictRequest(BaseModel):
     forecast: List[ForecastRow]
+    weather: Optional[List[WeatherRow]] = None
     volume_mw: float = 100.0
     use_gate: bool = False
     run_id: Optional[str] = None
@@ -71,6 +83,7 @@ def _build_panel():
     panel = M.daily_panel(mn, gas_df, wx)
     models = M.train_models(panel)
     models["_wx"] = wx
+    models["_wxnorm"] = M.weather_normals([c for c in csvs if c not in ercot_files])
     _cache.update(key=today, models=models, panel=panel)
     return panel, models
 
@@ -96,21 +109,38 @@ def predict(req: PredictRequest, x_api_key: Optional[str] = Header(None)):
         fc = fc.drop(columns=["t_anom", "t_anom_abs", "t_anom_max"]).merge(
             models["_wx"], on="date", how="left")
 
-    last = panel.dropna(subset=["DA_avg"]).iloc[-1]
-    reg = dict(prc_low_r7=float(last.prc_low_r7), da_med=float(last.da_med),
-               basis_lag1=float(last.basis_mean), basis_r7=float(last.basis_r7),
-               prem_rate_r7=float(last.prem_rate_r7), gas_lag1=float(last.gas),
-               gas_r7=float(last.gas_r7), nfe_lag1=float(last.nfe), nfe_r7=float(last.nfe_r7),
-               DA_r3=float(last.DA_r3), DA_r7=float(last.DA_r7), DA_r14=float(last.DA_r14))
+    # 요청에 기온 예보가 오면 그것으로 t_anom 을 채운다(과거 CSV 에 없는 미래 날짜용).
+    # 예보 대상은 항상 미래라 이 경로가 없으면 날씨 피처가 사실상 늘 비어 있게 된다.
+    norm = models.get("_wxnorm")
+    if req.weather and norm is not None:
+        w = pd.DataFrame([r.model_dump() for r in req.weather])
+        w["date"] = pd.to_datetime(w["date"], errors="coerce").dt.normalize()
+        w = w.dropna(subset=["date"]).drop_duplicates(subset=["date"], keep="last")
+        doy = w.date.dt.dayofyear
+        w["_anom"] = w.temp_mean_f - doy.map(norm["mean"])
+        w["_anom_max"] = (w.temp_max_f - doy.map(norm["max"])
+                          if norm.get("max") is not None and "temp_max_f" in w.columns
+                          else float("nan"))
+        # 과거 CSV 에 실측이 있으면 그쪽 우선. 요청의 기온은 '예보' 이므로 빈 곳만 채운다.
+        fc = fc.merge(w[["date", "_anom", "_anom_max"]], on="date", how="left")
+        fc["t_anom"] = fc["t_anom"].combine_first(fc["_anom"])
+        fc["t_anom_max"] = fc["t_anom_max"].combine_first(fc["_anom_max"])
+        fc["t_anom_abs"] = fc["t_anom"].abs()
+        fc = fc.drop(columns=["_anom", "_anom_max"])
+
+    n_missing_wx = int(fc["t_anom"].isna().sum())
+
+    reg, d0_ts = M.regime_from_last(panel)      # CLI(run) 와 동일한 구성 — 두 경로가 갈리지 않게
 
     rows = M.forecast_rows(fc, models, reg, req.volume_mw, use_gate=req.use_gate)
-    d0 = pd.Timestamp(last["date"]).date().isoformat()
+    d0 = pd.Timestamp(d0_ts).date().isoformat()
     return {
         "run_id": req.run_id or dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
         "generated_at": dt.datetime.utcnow().isoformat(),
         "model_version": "v4-weather",
         "d0_last_actual": d0,
         "regime": {"prc_low_r7": reg["prc_low_r7"], "da_med": reg["da_med"]},
+        "weather_missing_days": n_missing_wx,   # >0 이면 그 날은 날씨 피처·오버레이 없이 산출됨
         "rows": rows,
     }
 

@@ -3,13 +3,23 @@
   "nodes": [
     {
       "parameters": {
-        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 13 * * *" }] }
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 13 * * *"
+            }
+          ]
+        }
       },
       "id": "trg",
       "name": "Cron 08:00 CT (13:00 UTC)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-560, 300],
+      "position": [
+        -560,
+        300
+      ],
       "notes": "DA 입찰 마감(10:00 CT) 전에 결과가 나오도록 08:00 CT 실행"
     },
     {
@@ -18,32 +28,60 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "latitude", "value": "29.76,32.78,30.27,29.42" },
-            { "name": "longitude", "value": "-95.37,-96.80,-97.74,-98.49" },
-            { "name": "hourly", "value": "temperature_2m" },
-            { "name": "temperature_unit", "value": "fahrenheit" },
-            { "name": "forecast_days", "value": "5" },
-            { "name": "timezone", "value": "America/Chicago" }
+            {
+              "name": "latitude",
+              "value": "29.76,32.78,30.27,29.42"
+            },
+            {
+              "name": "longitude",
+              "value": "-95.37,-96.80,-97.74,-98.49"
+            },
+            {
+              "name": "hourly",
+              "value": "temperature_2m"
+            },
+            {
+              "name": "temperature_unit",
+              "value": "fahrenheit"
+            },
+            {
+              "name": "forecast_days",
+              "value": "5"
+            },
+            {
+              "name": "timezone",
+              "value": "America/Chicago"
+            }
           ]
         },
-        "options": { "timeout": 20000 }
+        "options": {
+          "timeout": 20000
+        }
       },
       "id": "wx",
       "name": "Open-Meteo 4-city",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-340, 200]
+      "position": [
+        -340,
+        200
+      ]
     },
     {
       "parameters": {
         "url": "={{ $env.ERCOT_FORECAST_URL }}",
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
       "id": "erc",
       "name": "ERCOT Load/Wind/Solar Forecast",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-340, 400],
+      "position": [
+        -340,
+        400
+      ],
       "notes": "ERCOT MIS 또는 사내 Azure SQL 프록시. 시간별 fc_load_mw / fc_wind_mw / fc_solar_mw 반환"
     },
     {
@@ -56,17 +94,23 @@
       "name": "Merge Inputs",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [-120, 300]
+      "position": [
+        -120,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ERCOT 예보를 모델 스키마(timestamp, fc_load_mw, fc_wind_mw, fc_solar_mw)로 정규화.\n// 실제 소스 스키마에 맞게 이 매핑만 수정하면 된다.\nconst src = $input.all()[0].json;\nconst hours = src.hourly ?? src.data ?? [];\nconst forecast = hours.map(h => ({\n  timestamp: h.timestamp ?? h.DeliveryDate,\n  fc_load_mw: Number(h.load ?? h.SystemLoad),\n  fc_wind_mw: Number(h.wind ?? h.WindGen),\n  fc_solar_mw: Number(h.solar ?? h.SolarGen)\n})).filter(r => r.timestamp && !Number.isNaN(r.fc_load_mw));\n\nif (forecast.length < 24) {\n  throw new Error(`예보 행이 부족합니다 (${forecast.length}행). 모델 실행을 중단합니다.`);\n}\nreturn [{ json: {\n  forecast,\n  volume_mw: Number($env.VOLUME_MW ?? 100),\n  use_gate: false,\n  run_id: new Date().toISOString().slice(0,19).replace(/[-:]/g,'')\n}}];"
+        "jsCode": "// 두 소스를 '이름'으로 직접 참조한다. Merge 결과의 순서/병합 방식에 의존하면 깨진다.\n// (예전 코드는 $input.all()[0] 을 ERCOT 로 가정했는데, Merge input 0 은 Open-Meteo 라\n//  실제로는 날씨 응답을 예보로 파싱하려다 실패했다.)\nconst ercotRaw = $('ERCOT Load/Wind/Solar Forecast').all()[0].json;\nconst wxRaw    = $('Open-Meteo 4-city').all().map(i => i.json);\n\n// ---------- 1) ERCOT 시간별 예보 -> 모델 스키마 ----------\n// 사내 소스 스키마가 다르면 이 매핑만 고치면 된다.\nconst hours = ercotRaw.hourly ?? ercotRaw.data ?? ercotRaw.rows\n              ?? (Array.isArray(ercotRaw) ? ercotRaw : []);\nconst forecast = (Array.isArray(hours) ? hours : []).map(h => ({\n  timestamp:  h.timestamp ?? h.DeliveryDate ?? h.time,\n  fc_load_mw: Number(h.load  ?? h.SystemLoad),\n  fc_wind_mw: Number(h.wind  ?? h.WindGen),\n  fc_solar_mw: Number(h.solar ?? h.SolarGen)\n})).filter(r => r.timestamp && !Number.isNaN(r.fc_load_mw));\n\nif (forecast.length < 24) {\n  throw new Error(`예보 행이 부족합니다 (${forecast.length}행). 불완전한 입력으로 배분하지 않는다.`);\n}\n\n// ---------- 2) Open-Meteo 4개 도시 시간별 기온 -> 날짜별 4-city 평균 ----------\n// 과거 학습 데이터가 'Texas 4-city average' 이므로 동일 방식으로 맞춘다:\n//   도시별로 하루 평균/최고를 낸 뒤, 그 값을 도시 간 평균한다.\n//   (전체 시간을 뭉뚱그려 max 를 잡으면 학습 때 기준보다 높아져 anomaly 가 왜곡된다.)\nconst locs = wxRaw.flatMap(x => Array.isArray(x) ? x : [x]).filter(x => x && x.hourly);\nconst perDate = {};\nfor (const loc of locs) {\n  const t = loc.hourly.time || [], v = loc.hourly.temperature_2m || [];\n  const day = {};\n  for (let i = 0; i < t.length; i++) {\n    const d = String(t[i]).slice(0, 10), x = Number(v[i]);\n    if (!d || Number.isNaN(x)) continue;\n    if (!day[d]) day[d] = { sum: 0, n: 0, max: -Infinity };\n    day[d].sum += x; day[d].n++; if (x > day[d].max) day[d].max = x;\n  }\n  for (const [d, a] of Object.entries(day)) {\n    if (a.n < 24) continue;                       // 하루가 온전히 채워진 날만\n    if (!perDate[d]) perDate[d] = { means: [], maxes: [] };\n    perDate[d].means.push(a.sum / a.n);\n    perDate[d].maxes.push(a.max);\n  }\n}\nconst avg = a => a.reduce((s, x) => s + x, 0) / a.length;\nconst weather = Object.entries(perDate)\n  .map(([date, a]) => ({ date,\n                         temp_mean_f: Number(avg(a.means).toFixed(2)),\n                         temp_max_f:  Number(avg(a.maxes).toFixed(2)) }))\n  .sort((a, b) => a.date < b.date ? -1 : 1);\n\nif (!weather.length) {\n  throw new Error('Open-Meteo 기온 파싱 실패. 날씨 없이 돌리면 M1 날씨피처와 오버레이가 죽는다.');\n}\n\nreturn [{ json: {\n  forecast,\n  weather,                                        // /predict 가 이걸로 t_anom 을 만든다\n  volume_mw: Number($env.VOLUME_MW ?? 100),\n  use_gate: false,\n  run_id: new Date().toISOString().slice(0, 19).replace(/[-:]/g, '')\n}}];"
       },
       "id": "shape",
       "name": "Shape Forecast Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [100, 300]
+      "position": [
+        100,
+        300
+      ]
     },
     {
       "parameters": {
@@ -74,43 +118,75 @@
         "url": "={{ $env.RENDER_URL }}/predict",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "x-api-key", "value": "={{ $env.MODEL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.MODEL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": { "timeout": 240000, "retry": { "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 15000 } }
+        "options": {
+          "timeout": 240000,
+          "retry": {
+            "retryOnFail": true,
+            "maxTries": 3,
+            "waitBetweenTries": 15000
+          }
+        }
       },
       "id": "render",
       "name": "Render /predict",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [320, 300],
+      "position": [
+        320,
+        300
+      ],
       "notes": "타임아웃 240초: Render 콜드스타트 + XGBoost 학습(10~30초) 감안"
     },
     {
       "parameters": {
-        "jsCode": "// 모델 응답을 시트 1행/horizon 으로 평탄화.\nconst r = $input.all()[0].json;\nreturn r.rows.map(row => ({ json: {\n  run_id: r.run_id,\n  generated_at: r.generated_at,\n  model_version: r.model_version,\n  d0_last_actual: r.d0_last_actual,\n  horizon: row.horizon,\n  target_date: row.date,\n  M1_P_DA_cheaper: row.M1_P_DA_cheaper,\n  M2_DA_pred_USD: row.M2_DA_pred_USD,\n  M3_gate_signal: row.M3_gate_signal,\n  M3_gate_reason: row.M3_gate_reason,\n  M4_premium_prob: row.M4_premium_prob,\n  vote_M1_DA: row.vote_M1_DA,\n  vote_M2_DA: row.vote_M2_DA,\n  vote_M4_DA: row.vote_M4_DA,\n  WX_t_anom_F: row.WX_t_anom_F,\n  WX_overlay: row.WX_overlay,\n  base_DA: row.base_DA,\n  DA_fraction: row.DA_fraction,\n  RT_fraction: row.RT_fraction,\n  DA_MW: row.DA_MW,\n  RT_MW: row.RT_MW,\n  DA_actual: '',\n  RT_actual: '',\n  DART_actual: '',\n  blended_cost: '',\n  hit: ''\n}}));"
+        "jsCode": "// 모델 응답을 시트 1행/horizon 으로 평탄화.\nconst r = $input.all()[0].json;\nif (Number(r.weather_missing_days ?? 0) > 0) {\n  throw new Error(`날씨 결측 ${r.weather_missing_days}일 — M1 날씨피처/오버레이가 비활성 상태로 산출됐습니다. 조용히 기록하지 않고 중단합니다.`);\n}\nreturn r.rows.map(row => ({ json: {\n  run_id: r.run_id,\n  generated_at: r.generated_at,\n  model_version: r.model_version,\n  d0_last_actual: r.d0_last_actual,\n  horizon: row.horizon,\n  target_date: row.date,\n  M1_P_DA_cheaper: row.M1_P_DA_cheaper,\n  M2_DA_pred_USD: row.M2_DA_pred_USD,\n  M3_gate_signal: row.M3_gate_signal,\n  M3_gate_reason: row.M3_gate_reason,\n  M4_premium_prob: row.M4_premium_prob,\n  vote_M1_DA: row.vote_M1_DA,\n  vote_M2_DA: row.vote_M2_DA,\n  vote_M4_DA: row.vote_M4_DA,\n  WX_t_anom_F: row.WX_t_anom_F,\n  WX_overlay: row.WX_overlay,\n  base_DA: row.base_DA,\n  DA_fraction: row.DA_fraction,\n  RT_fraction: row.RT_fraction,\n  DA_MW: row.DA_MW,\n  RT_MW: row.RT_MW,\n  DA_actual: '',\n  RT_actual: '',\n  DART_actual: '',\n  blended_cost: '',\n  hit: ''\n}}));"
       },
       "id": "flat",
       "name": "Flatten Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [540, 300]
+      "position": [
+        540,
+        300
+      ]
     },
     {
       "parameters": {
         "operation": "append",
-        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
-        "columns": { "mappingMode": "autoMapInputData", "matchingColumns": [] },
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "predictions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": []
+        },
         "options": {}
       },
       "id": "sheet1",
       "name": "Sheets: predictions (append)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [760, 300]
+      "position": [
+        760,
+        300
+      ]
     },
     {
       "parameters": {
@@ -120,7 +196,10 @@
       "name": "Build Claude Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [980, 300]
+      "position": [
+        980,
+        300
+      ]
     },
     {
       "parameters": {
@@ -129,59 +208,211 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
-            { "name": "anthropic-version", "value": "2023-06-01" },
-            { "name": "content-type", "value": "application/json" }
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-6',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
-        "options": { "timeout": 60000, "retry": { "retryOnFail": true, "maxTries": 2 } }
+        "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
+        "options": {
+          "timeout": 60000,
+          "retry": {
+            "retryOnFail": true,
+            "maxTries": 2
+          }
+        }
       },
       "id": "claude",
       "name": "Claude API - Daily Commentary",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1200, 300]
+      "position": [
+        1200,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.all()[0].json;\nconst text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nconst rows = $('Flatten Rows').all().map(i => i.json);\nreturn [{ json: {\n  run_id: $('Build Claude Context').all()[0].json.run_id,\n  logged_at: new Date().toISOString(),\n  kind: 'daily_commentary',\n  model: res.model || 'claude-sonnet-4-6',\n  target_dates: rows.map(r => r.target_date).join(','),\n  mean_DA_fraction: (rows.reduce((s,r)=>s+Number(r.DA_fraction),0)/rows.length).toFixed(3),\n  commentary: text,\n  input_tokens: res.usage?.input_tokens ?? '',\n  output_tokens: res.usage?.output_tokens ?? ''\n}}];"
+        "jsCode": "const res = $input.all()[0].json;\nconst text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nconst rows = $('Flatten Rows').all().map(i => i.json);\nreturn [{ json: {\n  run_id: $('Build Claude Context').all()[0].json.run_id,\n  logged_at: new Date().toISOString(),\n  kind: 'daily_commentary',\n  model: res.model || ($env.CLAUDE_MODEL || 'claude-sonnet-5'),\n  target_dates: rows.map(r => r.target_date).join(','),\n  mean_DA_fraction: (rows.reduce((s,r)=>s+Number(r.DA_fraction),0)/rows.length).toFixed(3),\n  commentary: text,\n  input_tokens: res.usage?.input_tokens ?? '',\n  output_tokens: res.usage?.output_tokens ?? ''\n}}];"
       },
       "id": "parse",
       "name": "Parse Claude Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1420, 300]
+      "position": [
+        1420,
+        300
+      ]
     },
     {
       "parameters": {
         "operation": "append",
-        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "analysis", "mode": "name" },
-        "columns": { "mappingMode": "autoMapInputData", "matchingColumns": [] },
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "analysis",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": []
+        },
         "options": {}
       },
       "id": "sheet2",
       "name": "Sheets: analysis (append)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1640, 300]
+      "position": [
+        1640,
+        300
+      ]
     }
   ],
   "connections": {
-    "Cron 08:00 CT (13:00 UTC)": { "main": [[{ "node": "Open-Meteo 4-city", "type": "main", "index": 0 }, { "node": "ERCOT Load/Wind/Solar Forecast", "type": "main", "index": 0 }]] },
-    "Open-Meteo 4-city": { "main": [[{ "node": "Merge Inputs", "type": "main", "index": 0 }]] },
-    "ERCOT Load/Wind/Solar Forecast": { "main": [[{ "node": "Merge Inputs", "type": "main", "index": 1 }]] },
-    "Merge Inputs": { "main": [[{ "node": "Shape Forecast Payload", "type": "main", "index": 0 }]] },
-    "Shape Forecast Payload": { "main": [[{ "node": "Render /predict", "type": "main", "index": 0 }]] },
-    "Render /predict": { "main": [[{ "node": "Flatten Rows", "type": "main", "index": 0 }]] },
-    "Flatten Rows": { "main": [[{ "node": "Sheets: predictions (append)", "type": "main", "index": 0 }]] },
-    "Sheets: predictions (append)": { "main": [[{ "node": "Build Claude Context", "type": "main", "index": 0 }]] },
-    "Build Claude Context": { "main": [[{ "node": "Claude API - Daily Commentary", "type": "main", "index": 0 }]] },
-    "Claude API - Daily Commentary": { "main": [[{ "node": "Parse Claude Response", "type": "main", "index": 0 }]] },
-    "Parse Claude Response": { "main": [[{ "node": "Sheets: analysis (append)", "type": "main", "index": 0 }]] }
+    "Cron 08:00 CT (13:00 UTC)": {
+      "main": [
+        [
+          {
+            "node": "Open-Meteo 4-city",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ERCOT Load/Wind/Solar Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open-Meteo 4-city": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Load/Wind/Solar Forecast": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Inputs": {
+      "main": [
+        [
+          {
+            "node": "Shape Forecast Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Forecast Payload": {
+      "main": [
+        [
+          {
+            "node": "Render /predict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render /predict": {
+      "main": [
+        [
+          {
+            "node": "Flatten Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Rows": {
+      "main": [
+        [
+          {
+            "node": "Sheets: predictions (append)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: predictions (append)": {
+      "main": [
+        [
+          {
+            "node": "Build Claude Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Claude Context": {
+      "main": [
+        [
+          {
+            "node": "Claude API - Daily Commentary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API - Daily Commentary": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Claude Response": {
+      "main": [
+        [
+          {
+            "node": "Sheets: analysis (append)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  }
 }
