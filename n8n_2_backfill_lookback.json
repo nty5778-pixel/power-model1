@@ -1,0 +1,231 @@
+{
+  "name": "ERCOT DART 2 - Backfill Actuals & Weekly Look-back",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 16 * * *" }] }
+      },
+      "id": "trg1",
+      "name": "Cron Daily 11:00 CT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-560, 200],
+      "notes": "D+1 정산 확정 후 실적 backfill"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
+        "options": {}
+      },
+      "id": "read1",
+      "name": "Sheets: read predictions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 실적이 비어 있고 target_date 가 이미 지난 D+1 행만 골라낸다.\n// (D+2~D+4 예측은 해당 날짜가 D+1 로 다시 예측되므로, 채점은 D+1 만 사용해\n//  horizon 간 중복 집계를 피한다.)\nconst rows = $input.all().map(i => i.json);\nconst today = new Date(); today.setHours(0,0,0,0);\nconst pending = rows.filter(r => {\n  if (r.horizon !== 'D+1') return false;\n  if (r.DA_actual !== '' && r.DA_actual != null) return false;\n  const d = new Date(r.target_date);\n  return d < today;\n});\nif (!pending.length) return [{ json: { skip: true, reason: 'no pending rows' } }];\nreturn pending.map(r => ({ json: { ...r, skip: false } }));"
+      },
+      "id": "pend",
+      "name": "Find Pending Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-120, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [{
+            "leftValue": "={{ $json.skip }}",
+            "rightValue": false,
+            "operator": { "type": "boolean", "operation": "false" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gate",
+      "name": "Has Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [100, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ERCOT_SETTLE_URL }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "date", "value": "={{ $json.target_date }}" },
+            { "name": "zone", "value": "LZ_HOUSTON" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "settle",
+      "name": "Fetch Settlement DA/RT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 120],
+      "notes": "정산 소스는 authoritative 여야 함 — TimeSeriesExport 파생값 사용 금지"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 예측행 + 실적가격 결합 → 채점 필드 계산\nconst pred = $('Find Pending Rows').all().map(i => i.json);\nconst out = [];\nfor (let i = 0; i < pred.length; i++) {\n  const s = $input.all()[i]?.json ?? {};\n  const DA = Number(s.DA_avg ?? s.da ?? NaN);\n  const RT = Number(s.RT_avg ?? s.rt ?? NaN);\n  if (Number.isNaN(DA) || Number.isNaN(RT)) continue;\n  const f = Number(pred[i].DA_fraction);\n  const dart = RT - DA;\n  out.push({ json: {\n    ...pred[i],\n    DA_actual: DA.toFixed(2),\n    RT_actual: RT.toFixed(2),\n    DART_actual: dart.toFixed(2),\n    blended_cost: (f*DA + (1-f)*RT).toFixed(2),\n    hit: ((f > 0.5) === (dart > 0)) ? 'Y' : 'N'\n  }});\n}\nreturn out;"
+      },
+      "id": "join",
+      "name": "Join & Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [540, 120]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["run_id", "horizon"]
+        },
+        "options": {}
+      },
+      "id": "upd",
+      "name": "Sheets: update actuals",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [760, 120],
+      "notes": "run_id + horizon 복합키로 매칭 — append 가 아니라 update"
+    },
+
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 17 * * 1" }] }
+      },
+      "id": "trg2",
+      "name": "Cron Weekly Mon 12:00 CT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-560, 560]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "predictions", "mode": "name" },
+        "options": {}
+      },
+      "id": "read2",
+      "name": "Sheets: read scored history",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-340, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 채점 완료된 D+1 행만 → /score 페이로드\nconst rows = $input.all().map(i => i.json)\n  .filter(r => r.horizon === 'D+1' && r.DA_actual !== '' && r.DA_actual != null);\nif (rows.length < 20) {\n  return [{ json: { insufficient: true, n: rows.length } }];\n}\nreturn [{ json: { insufficient: false, payload: rows.map(r => ({\n  date: r.target_date,\n  DA_fraction: Number(r.DA_fraction),\n  DA_actual: Number(r.DA_actual),\n  RT_actual: Number(r.RT_actual)\n})) } }];"
+      },
+      "id": "prep",
+      "name": "Prepare Score Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-120, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RENDER_URL }}/score",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-api-key", "value": "={{ $env.MODEL_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "score",
+      "name": "Render /score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [100, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 최근 30일 vs 전체 비교 → 드리프트 판정 (경보용, 자동 튜닝 아님)\nconst s = $input.all()[0].json;\nconst det = s.detail || [];\nconst sorted = det.slice().sort((a,b) => new Date(a.date) - new Date(b.date));\nconst recent = sorted.slice(-30);\nconst mean = (a, k) => a.length ? a.reduce((x,r)=>x+Number(r[k]),0)/a.length : null;\nconst hitOf = a => a.length ? a.filter(r => (r.DA_fraction>0.5)===(r.DART>0)).length/a.length*100 : null;\nconst rHit = hitOf(recent), aHit = s.hit_rate_all;\nconst rVsRt = mean(recent, 'vs_rt');\n// 경보 임계: 최근 30일 vs RT 열위가 $1 초과 또는 큰날 적중 45% 미만\nconst alerts = [];\nif (rVsRt !== null && rVsRt > 1.0) alerts.push(`최근 30일 RT 대비 +$${rVsRt.toFixed(2)} 열위`);\nif (s.hit_rate_big5 !== null && s.hit_rate_big5 < 45) alerts.push(`큰날(|DART|≥$5) 적중 ${s.hit_rate_big5}%`);\nif (s.n_days >= 120 && Math.abs((rHit ?? 0) - aHit) > 15) alerts.push(`최근 적중률 편차 ${(rHit-aHit).toFixed(0)}p`);\nreturn [{ json: {\n  window_all_days: s.n_days,\n  cost_blended: s.cost_blended, cost_all_rt: s.cost_all_rt, cost_all_da: s.cost_all_da,\n  vs_rt: s.vs_rt, vs_da: s.vs_da, cost_std: s.cost_std,\n  hit_rate_all: s.hit_rate_all, hit_rate_big5: s.hit_rate_big5, n_big5: s.n_big5,\n  mean_da_fraction: s.mean_da_fraction,\n  recent30_hit: rHit === null ? '' : rHit.toFixed(1),\n  recent30_vs_rt: rVsRt === null ? '' : rVsRt.toFixed(3),\n  alert: alerts.length ? alerts.join(' / ') : 'none'\n}}];"
+      },
+      "id": "drift",
+      "name": "Compute Drift Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-6',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "claude2",
+      "name": "Claude API - Weekly Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [540, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.all()[0].json;\nconst m = $('Compute Drift Metrics').all()[0].json;\nconst text = (res.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\\n').trim();\nreturn [{ json: { logged_at: new Date().toISOString(), kind: 'weekly_lookback', ...m, commentary: text } }];"
+      },
+      "id": "parse2",
+      "name": "Parse Weekly Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 560]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "lookback", "mode": "name" },
+        "columns": { "mappingMode": "autoMapInputData", "matchingColumns": [] },
+        "options": {}
+      },
+      "id": "sheet3",
+      "name": "Sheets: lookback (append)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [980, 560]
+    }
+  ],
+  "connections": {
+    "Cron Daily 11:00 CT": { "main": [[{ "node": "Sheets: read predictions", "type": "main", "index": 0 }]] },
+    "Sheets: read predictions": { "main": [[{ "node": "Find Pending Rows", "type": "main", "index": 0 }]] },
+    "Find Pending Rows": { "main": [[{ "node": "Has Pending?", "type": "main", "index": 0 }]] },
+    "Has Pending?": { "main": [[{ "node": "Fetch Settlement DA/RT", "type": "main", "index": 0 }], []] },
+    "Fetch Settlement DA/RT": { "main": [[{ "node": "Join & Score", "type": "main", "index": 0 }]] },
+    "Join & Score": { "main": [[{ "node": "Sheets: update actuals", "type": "main", "index": 0 }]] },
+    "Cron Weekly Mon 12:00 CT": { "main": [[{ "node": "Sheets: read scored history", "type": "main", "index": 0 }]] },
+    "Sheets: read scored history": { "main": [[{ "node": "Prepare Score Payload", "type": "main", "index": 0 }]] },
+    "Prepare Score Payload": { "main": [[{ "node": "Render /score", "type": "main", "index": 0 }]] },
+    "Render /score": { "main": [[{ "node": "Compute Drift Metrics", "type": "main", "index": 0 }]] },
+    "Compute Drift Metrics": { "main": [[{ "node": "Claude API - Weekly Review", "type": "main", "index": 0 }]] },
+    "Claude API - Weekly Review": { "main": [[{ "node": "Parse Weekly Review", "type": "main", "index": 0 }]] },
+    "Parse Weekly Review": { "main": [[{ "node": "Sheets: lookback (append)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

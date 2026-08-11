@@ -1,0 +1,23 @@
+# 실행 산출물
+allocation_review.csv
+backtest_daily.csv
+backtest_summary.csv
+forecast_input.csv
+
+# 원본 데이터 보관함 — 배포에 불필요.
+# data/ 에 정제본이 있고, 여기엔 모델이 쓰지 않는 Congesiton_*.csv 3MB 가 들어 있다.
+# (로컬 디스크에는 그대로 남는다. git 에만 안 올라간다.)
+3rd Model/
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# 에디터/OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
