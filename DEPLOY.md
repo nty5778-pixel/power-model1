@@ -156,24 +156,50 @@ curl https://<서비스명>.onrender.com/health
 
 ---
 
-## 4. n8n
+## 4. n8n (Cloud 기준)
 
-### 4-1. 환경변수
+값을 넣는 곳이 **두 군데로 갈린다.** 섞으면 안 된다.
 
-| 키 | 값 |
+> **왜 나누나** — n8n Cloud 는 서버 환경변수(`$env`) 접근을 막는다. 자체 설치에서만 되는
+> 기능이라 Cloud 에서는 **Variables**(`$vars`)를 쓴다. 그런데 Variables 는 **평문**이고
+> 워크스페이스 멤버에게 그대로 보인다 — n8n 문서도 비밀값은 Credentials 를 쓰라고 한다.
+> 그래서 **주소·설정은 Variables, API 키는 Credentials** 로 나눴다.
+> (자체 설치로 옮기게 되면 `$vars.` 를 `$env.` 로 되돌리고 OS 환경변수에 넣으면 된다.)
+
+### 4-1. Variables — 비밀이 아닌 설정값
+
+**Settings → Variables** 에서 추가한다.
+
+| 이름 | 값 |
 |---|---|
-| `RENDER_URL` | `https://<서비스명>.onrender.com` (끝에 `/` 없이) |
-| `MODEL_API_KEY` | Render 의 `API_KEY` 와 **같은 값** |
-| `ANTHROPIC_API_KEY` | Claude API 키 |
+| `RENDER_URL` | `https://<서비스명>.onrender.com` — **끝에 `/` 없이** |
 | `SHEET_ID` | §1 에서 메모한 값 |
-| `VOLUME_MW` | 기본 `100` |
-| `CLAUDE_MODEL` | (선택) 비워두면 `claude-sonnet-5` |
+| `VOLUME_MW` | `100` |
+| `CLAUDE_MODEL` | (선택) 비우면 `claude-sonnet-5` |
 | `ERCOT_FORECAST_URL` | **→ §5 참조. 아직 미정** |
 | `ERCOT_SETTLE_URL` | **→ §5 참조. 아직 미정** |
 
-### 4-2. Credential
+⚠️ **API 키를 여기에 넣지 말 것.** 아래 4-2 로 간다.
 
-Google Sheets OAuth2 또는 서비스 계정을 등록하고, 워크플로의 Sheets 노드 4곳에 지정한다.
+> Variables 메뉴가 안 보이면 요금제에 그 기능이 없는 것이다. 그때는 Variables 대신
+> 각 노드에 값을 직접 입력해도 된다(비밀값이 아니므로 안전). 표현식
+> `{{ $vars.RENDER_URL }}` 자리에 주소를 그대로 타이핑하면 된다.
+
+### 4-2. Credentials — API 키
+
+**Credentials → Add credential** 에서 만든다. 워크플로에는 이미 이 이름으로 연결돼 있으니
+**이름을 정확히 같게** 만들면 자동으로 붙는다.
+
+| Credential 이름 | 종류 | 설정 |
+|---|---|---|
+| `Render Model API` | Header Auth | Name `x-api-key` · Value = Render 의 `API_KEY` **와 같은 값** |
+| `Anthropic API` | Header Auth | Name `x-api-key` · Value = Claude API 키 |
+| (이름 자유) | Google Sheets OAuth2 또는 서비스 계정 | 시트 노드 4곳에 지정 |
+
+서비스 계정으로 하면 §1 스프레드시트를 그 계정 이메일에 **편집 권한**으로 공유해야 한다.
+
+> `/health`(깨우기) 노드에는 인증이 없다 — 서버도 이 경로만 인증을 요구하지 않는다.
+> 나머지 Render 호출 2곳(`/predict`, `/score`)에만 `Render Model API` 가 붙어 있다.
 
 ### 4-3. 워크플로 가져오기
 
@@ -238,7 +264,9 @@ TimeSeriesExport 파생값은 실제 정산치와 어긋나는 것이 확인됐�
 | `예보 행이 부족합니다` | `ERCOT_FORECAST_URL` 응답 형태 불일치 → Shape 노드 매핑 수정 |
 | `Open-Meteo 기온 파싱 실패` | Open-Meteo 응답 구조 변경 |
 | `날씨 결측 N일` | 서버가 예보일의 기온을 못 받았다 → payload 의 `weather` 확인 |
-| `/predict` 401 | `MODEL_API_KEY` ≠ Render `API_KEY` |
+| `/predict` 401 | Credential `Render Model API` 의 값 ≠ Render `API_KEY` |
+| 주소가 `/predict` 만 남고 앞이 비어 있음 | Variable `RENDER_URL` 이 없거나 이름이 다름 (§4-1) |
+| 표현식에 `[undefined]` 표시 | 같은 원인. Variables 메뉴가 없는 요금제면 §4-1 아래 안내대로 직접 입력 |
 | `/predict` 500 `no ERCOT history CSV` | `data/` 가 배포에 안 올라감 → `.gitignore` 확인 |
 | `/predict` 400 `alloc 은 ... 중 하나` | `ALLOC_MODE` 오타. `m1_only` 또는 `ensemble` |
 | `DA_fraction` 이 중간값 + `WX_overlay` 비어 있음 | `ALLOC_MODE` 가 `ensemble` 로 설정돼 있다 → §7 |

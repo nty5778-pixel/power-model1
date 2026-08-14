@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.RENDER_URL }}/health",
+        "url": "={{ $vars.RENDER_URL }}/health",
         "options": {
           "timeout": 240000
         }
@@ -92,7 +92,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.ERCOT_FORECAST_URL }}",
+        "url": "={{ $vars.ERCOT_FORECAST_URL }}",
         "options": {
           "timeout": 60000
         }
@@ -127,7 +127,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 두 소스를 '이름'으로 직접 참조한다. Merge 결과의 순서/병합 방식에 의존하면 깨진다.\n// (예전 코드는 $input.all()[0] 을 ERCOT 로 가정했는데, Merge input 0 은 Open-Meteo 라\n//  실제로는 날씨 응답을 예보로 파싱하려다 실패했다.)\nconst ercotRaw = $('ERCOT Load/Wind/Solar Forecast').all()[0].json;\nconst wxRaw    = $('Open-Meteo 4-city').all().map(i => i.json);\n\n// ---------- 1) ERCOT 시간별 예보 -> 모델 스키마 ----------\n// 사내 소스 스키마가 다르면 이 매핑만 고치면 된다.\nconst hours = ercotRaw.hourly ?? ercotRaw.data ?? ercotRaw.rows\n              ?? (Array.isArray(ercotRaw) ? ercotRaw : []);\nconst forecast = (Array.isArray(hours) ? hours : []).map(h => ({\n  timestamp:  h.timestamp ?? h.DeliveryDate ?? h.time,\n  fc_load_mw: Number(h.load  ?? h.SystemLoad),\n  fc_wind_mw: Number(h.wind  ?? h.WindGen),\n  fc_solar_mw: Number(h.solar ?? h.SolarGen)\n})).filter(r => r.timestamp && !Number.isNaN(r.fc_load_mw));\n\nif (forecast.length < 24) {\n  throw new Error(`예보 행이 부족합니다 (${forecast.length}행). 불완전한 입력으로 배분하지 않는다.`);\n}\n\n// ---------- 2) Open-Meteo 4개 도시 시간별 기온 -> 날짜별 4-city 평균 ----------\n// 과거 학습 데이터가 'Texas 4-city average' 이므로 동일 방식으로 맞춘다:\n//   도시별로 하루 평균/최고를 낸 뒤, 그 값을 도시 간 평균한다.\n//   (전체 시간을 뭉뚱그려 max 를 잡으면 학습 때 기준보다 높아져 anomaly 가 왜곡된다.)\nconst locs = wxRaw.flatMap(x => Array.isArray(x) ? x : [x]).filter(x => x && x.hourly);\nconst perDate = {};\nfor (const loc of locs) {\n  const t = loc.hourly.time || [], v = loc.hourly.temperature_2m || [];\n  const day = {};\n  for (let i = 0; i < t.length; i++) {\n    const d = String(t[i]).slice(0, 10), x = Number(v[i]);\n    if (!d || Number.isNaN(x)) continue;\n    if (!day[d]) day[d] = { sum: 0, n: 0, max: -Infinity };\n    day[d].sum += x; day[d].n++; if (x > day[d].max) day[d].max = x;\n  }\n  for (const [d, a] of Object.entries(day)) {\n    if (a.n < 24) continue;                       // 하루가 온전히 채워진 날만\n    if (!perDate[d]) perDate[d] = { means: [], maxes: [] };\n    perDate[d].means.push(a.sum / a.n);\n    perDate[d].maxes.push(a.max);\n  }\n}\nconst avg = a => a.reduce((s, x) => s + x, 0) / a.length;\nconst weather = Object.entries(perDate)\n  .map(([date, a]) => ({ date,\n                         temp_mean_f: Number(avg(a.means).toFixed(2)),\n                         temp_max_f:  Number(avg(a.maxes).toFixed(2)) }))\n  .sort((a, b) => a.date < b.date ? -1 : 1);\n\nif (!weather.length) {\n  throw new Error('Open-Meteo 기온 파싱 실패. 날씨 없이 돌리면 M1 날씨피처와 오버레이가 죽는다.');\n}\n\nreturn [{ json: {\n  forecast,\n  weather,                                        // /predict 가 이걸로 t_anom 을 만든다\n  volume_mw: Number($env.VOLUME_MW ?? 100),\n  use_gate: false,\n  run_id: new Date().toISOString().slice(0, 19).replace(/[-:]/g, '')\n}}];"
+        "jsCode": "// 두 소스를 '이름'으로 직접 참조한다. Merge 결과의 순서/병합 방식에 의존하면 깨진다.\n// (예전 코드는 $input.all()[0] 을 ERCOT 로 가정했는데, Merge input 0 은 Open-Meteo 라\n//  실제로는 날씨 응답을 예보로 파싱하려다 실패했다.)\nconst ercotRaw = $('ERCOT Load/Wind/Solar Forecast').all()[0].json;\nconst wxRaw    = $('Open-Meteo 4-city').all().map(i => i.json);\n\n// ---------- 1) ERCOT 시간별 예보 -> 모델 스키마 ----------\n// 사내 소스 스키마가 다르면 이 매핑만 고치면 된다.\nconst hours = ercotRaw.hourly ?? ercotRaw.data ?? ercotRaw.rows\n              ?? (Array.isArray(ercotRaw) ? ercotRaw : []);\nconst forecast = (Array.isArray(hours) ? hours : []).map(h => ({\n  timestamp:  h.timestamp ?? h.DeliveryDate ?? h.time,\n  fc_load_mw: Number(h.load  ?? h.SystemLoad),\n  fc_wind_mw: Number(h.wind  ?? h.WindGen),\n  fc_solar_mw: Number(h.solar ?? h.SolarGen)\n})).filter(r => r.timestamp && !Number.isNaN(r.fc_load_mw));\n\nif (forecast.length < 24) {\n  throw new Error(`예보 행이 부족합니다 (${forecast.length}행). 불완전한 입력으로 배분하지 않는다.`);\n}\n\n// ---------- 2) Open-Meteo 4개 도시 시간별 기온 -> 날짜별 4-city 평균 ----------\n// 과거 학습 데이터가 'Texas 4-city average' 이므로 동일 방식으로 맞춘다:\n//   도시별로 하루 평균/최고를 낸 뒤, 그 값을 도시 간 평균한다.\n//   (전체 시간을 뭉뚱그려 max 를 잡으면 학습 때 기준보다 높아져 anomaly 가 왜곡된다.)\nconst locs = wxRaw.flatMap(x => Array.isArray(x) ? x : [x]).filter(x => x && x.hourly);\nconst perDate = {};\nfor (const loc of locs) {\n  const t = loc.hourly.time || [], v = loc.hourly.temperature_2m || [];\n  const day = {};\n  for (let i = 0; i < t.length; i++) {\n    const d = String(t[i]).slice(0, 10), x = Number(v[i]);\n    if (!d || Number.isNaN(x)) continue;\n    if (!day[d]) day[d] = { sum: 0, n: 0, max: -Infinity };\n    day[d].sum += x; day[d].n++; if (x > day[d].max) day[d].max = x;\n  }\n  for (const [d, a] of Object.entries(day)) {\n    if (a.n < 24) continue;                       // 하루가 온전히 채워진 날만\n    if (!perDate[d]) perDate[d] = { means: [], maxes: [] };\n    perDate[d].means.push(a.sum / a.n);\n    perDate[d].maxes.push(a.max);\n  }\n}\nconst avg = a => a.reduce((s, x) => s + x, 0) / a.length;\nconst weather = Object.entries(perDate)\n  .map(([date, a]) => ({ date,\n                         temp_mean_f: Number(avg(a.means).toFixed(2)),\n                         temp_max_f:  Number(avg(a.maxes).toFixed(2)) }))\n  .sort((a, b) => a.date < b.date ? -1 : 1);\n\nif (!weather.length) {\n  throw new Error('Open-Meteo 기온 파싱 실패. 날씨 없이 돌리면 M1 날씨피처와 오버레이가 죽는다.');\n}\n\nreturn [{ json: {\n  forecast,\n  weather,                                        // /predict 가 이걸로 t_anom 을 만든다\n  volume_mw: Number($vars.VOLUME_MW ?? 100),\n  use_gate: false,\n  run_id: new Date().toISOString().slice(0, 19).replace(/[-:]/g, '')\n}}];"
       },
       "id": "shape",
       "name": "Shape Forecast Payload",
@@ -141,22 +141,15 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.RENDER_URL }}/predict",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.MODEL_API_KEY }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.RENDER_URL }}/predict",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 300000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "render",
       "name": "Render /predict",
@@ -166,10 +159,15 @@
         320,
         300
       ],
-      "notes": "타임아웃 300초. Free 티어는 CPU 0.1 이라 학습이 로컬(1초)보다 훨씬 느리다. 앞 단계에서 서버를 깨워뒀으므로 콜드스타트는 이미 끝난 상태다.",
+      "notes": "타임아웃 300초. Free 티어는 CPU 0.1 이라 학습이 로컬(1초)보다 훨씬 느리다. 앞 단계에서 서버를 깨워뒀으므로 콜드스타트는 이미 끝난 상태다. 인증은 Credential 'Render Model API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것.",
       "retryOnFail": true,
       "maxTries": 4,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Render Model API"
+        }
+      }
     },
     {
       "parameters": {
@@ -189,7 +187,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.SHEET_ID }}",
+          "value": "={{ $vars.SHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -233,10 +231,6 @@
         "headerParameters": {
           "parameters": [
             {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
               "name": "anthropic-version",
               "value": "2023-06-01"
             },
@@ -248,10 +242,12 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  model: $vars.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
         "options": {
           "timeout": 60000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "claude",
       "name": "Claude API - Daily Commentary",
@@ -263,11 +259,17 @@
       ],
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Anthropic API"
+        }
+      },
+      "notes": "인증은 Credential 'Anthropic API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것."
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.all()[0].json;\nconst text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nconst rows = $('Flatten Rows').all().map(i => i.json);\nreturn [{ json: {\n  run_id: $('Build Claude Context').all()[0].json.run_id,\n  logged_at: new Date().toISOString(),\n  kind: 'daily_commentary',\n  model: res.model || ($env.CLAUDE_MODEL || 'claude-sonnet-5'),\n  target_dates: rows.map(r => r.target_date).join(','),\n  mean_DA_fraction: (rows.reduce((s,r)=>s+Number(r.DA_fraction),0)/rows.length).toFixed(3),\n  commentary: text,\n  input_tokens: res.usage?.input_tokens ?? '',\n  output_tokens: res.usage?.output_tokens ?? ''\n}}];"
+        "jsCode": "const res = $input.all()[0].json;\nconst text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nconst rows = $('Flatten Rows').all().map(i => i.json);\nreturn [{ json: {\n  run_id: $('Build Claude Context').all()[0].json.run_id,\n  logged_at: new Date().toISOString(),\n  kind: 'daily_commentary',\n  model: res.model || ($vars.CLAUDE_MODEL || 'claude-sonnet-5'),\n  target_dates: rows.map(r => r.target_date).join(','),\n  mean_DA_fraction: (rows.reduce((s,r)=>s+Number(r.DA_fraction),0)/rows.length).toFixed(3),\n  commentary: text,\n  input_tokens: res.usage?.input_tokens ?? '',\n  output_tokens: res.usage?.output_tokens ?? ''\n}}];"
       },
       "id": "parse",
       "name": "Parse Claude Response",
@@ -283,7 +285,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.SHEET_ID }}",
+          "value": "={{ $vars.SHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {

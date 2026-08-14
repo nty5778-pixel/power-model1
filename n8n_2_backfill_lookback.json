@@ -27,7 +27,7 @@
         "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.SHEET_ID }}",
+          "value": "={{ $vars.SHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -91,7 +91,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.ERCOT_SETTLE_URL }}",
+        "url": "={{ $vars.ERCOT_SETTLE_URL }}",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -140,7 +140,7 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.SHEET_ID }}",
+          "value": "={{ $vars.SHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -193,7 +193,7 @@
         "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.SHEET_ID }}",
+          "value": "={{ $vars.SHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -228,22 +228,15 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.RENDER_URL }}/score",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.MODEL_API_KEY }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.RENDER_URL }}/score",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
         "options": {
           "timeout": 300000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "score",
       "name": "Render /score",
@@ -255,7 +248,13 @@
       ],
       "retryOnFail": true,
       "maxTries": 4,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Render Model API"
+        }
+      },
+      "notes": "인증은 Credential 'Render Model API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것."
     },
     {
       "parameters": {
@@ -278,10 +277,6 @@
         "headerParameters": {
           "parameters": [
             {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
               "name": "anthropic-version",
               "value": "2023-06-01"
             },
@@ -293,10 +288,12 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  model: $vars.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
         "options": {
           "timeout": 60000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "claude2",
       "name": "Claude API - Weekly Review",
@@ -308,7 +305,13 @@
       ],
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Anthropic API"
+        }
+      },
+      "notes": "인증은 Credential 'Anthropic API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것."
     },
     {
       "parameters": {
@@ -328,7 +331,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.SHEET_ID }}",
+          "value": "={{ $vars.SHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -353,7 +356,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.RENDER_URL }}/health",
+        "url": "={{ $vars.RENDER_URL }}/health",
         "options": {
           "timeout": 240000
         }
