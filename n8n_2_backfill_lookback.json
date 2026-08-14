@@ -13,14 +13,14 @@
         }
       },
       "id": "trg1",
-      "name": "Cron Daily 11:00 CT",
+      "name": "Cron Daily 16:00 UTC (11:00 CT 여름 / 10:00 겨울)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         -560,
         200
       ],
-      "notes": "D+1 정산 확정 후 실적 backfill"
+      "notes": "전일 정산 확정 후 실적 backfill. 이 경로는 Render 를 부르지 않으므로 (정산 소스 + 시트뿐) Free 티어 웨이크업이 필요 없다."
     },
     {
       "parameters": {
@@ -106,7 +106,7 @@
           ]
         },
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "id": "settle",
@@ -117,7 +117,10 @@
         320,
         120
       ],
-      "notes": "정산 소스는 authoritative 여야 함 — TimeSeriesExport 파생값 사용 금지"
+      "notes": "정산 소스는 authoritative 여야 함 — TimeSeriesExport 파생값 사용 금지",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -170,19 +173,20 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 17 * * 1"
+              "expression": "40 16 * * 1"
             }
           ]
         }
       },
       "id": "trg2",
-      "name": "Cron Weekly Mon 12:00 CT",
+      "name": "Cron Weekly Mon 16:40 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         -560,
         560
-      ]
+      ],
+      "notes": "Free 티어 웨이크업 감안해 20분 앞당김."
     },
     {
       "parameters": {
@@ -238,7 +242,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 300000
         }
       },
       "id": "score",
@@ -248,7 +252,10 @@
       "position": [
         100,
         560
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -298,7 +305,10 @@
       "position": [
         540,
         560
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -340,20 +350,29 @@
         980,
         560
       ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.RENDER_URL }}/health",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "id": "wake2",
+      "name": "Wake Render (Free) 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        700
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "notes": "Free 티어는 15분 놀면 잠든다. 이 요청이 서버를 깨운다 — 깨는 동안 연결을 붙잡고 기다리므로 타임아웃을 240초로 크게 잡았다. 여기서 깨워두면 뒤의 /predict 는 이미 깨어 있는 서버를 만나 빠르게 끝난다."
     }
   ],
   "connections": {
-    "Cron Daily 11:00 CT": {
-      "main": [
-        [
-          {
-            "node": "Sheets: read predictions",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Sheets: read predictions": {
       "main": [
         [
@@ -404,17 +423,6 @@
         [
           {
             "node": "Sheets: update actuals",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Cron Weekly Mon 12:00 CT": {
-      "main": [
-        [
-          {
-            "node": "Sheets: read scored history",
             "type": "main",
             "index": 0
           }
@@ -481,6 +489,39 @@
         [
           {
             "node": "Sheets: lookback (append)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Weekly Mon 16:40 UTC": {
+      "main": [
+        [
+          {
+            "node": "Wake Render (Free) 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wake Render (Free) 2": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read scored history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Daily 16:00 UTC (11:00 CT 여름 / 10:00 겨울)": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read predictions",
             "type": "main",
             "index": 0
           }

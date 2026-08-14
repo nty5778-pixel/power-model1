@@ -1,8 +1,15 @@
+# 이 파일은 Render 의 'Blueprint' 로 만들 때만 읽힌다.
+# New -> Web Service 로 만들면 무시되므로 buildCommand/startCommand/envVars 를
+# 대시보드에 직접 입력해야 한다. 값은 아래와 같다. (DEPLOY.md §3 참조)
 services:
   - type: web
     name: ercot-dart-model
     runtime: python
-    plan: starter          # free 는 15분 idle 후 spin-down → 콜드스타트 발생
+    # free: 15분 놀면 잠들고 다음 요청이 1~3분 걸린다.
+    #   n8n 워크플로가 본 작업 전에 /health 로 먼저 깨우고 시작하므로 운영에 지장은 없다.
+    #   메모리는 실측 188MB 로 free 한도 512MB 안에 넉넉히 들어간다.
+    #   상시 응답이 필요해지면 starter 로 올린다.
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 120
     healthCheckPath: /health
@@ -13,3 +20,7 @@ services:
         value: /opt/render/project/src/data
       - key: PYTHON_VERSION
         value: "3.11"
+      # free 는 CPU 0.1 이다. 기본값이면 XGBoost 가 호스트 코어 수만큼 스레드를 띄워
+      # 0.1 CPU 를 두고 서로 다투느라 오히려 느려진다. 1로 고정한다.
+      - key: OMP_NUM_THREADS
+        value: "1"

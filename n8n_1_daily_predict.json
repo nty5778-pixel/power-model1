@@ -7,20 +7,40 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 13 * * *"
+              "expression": "40 12 * * *"
             }
           ]
         }
       },
       "id": "trg",
-      "name": "Cron 08:00 CT (13:00 UTC)",
+      "name": "Cron 12:40 UTC (07:40 CT 여름 / 06:40 겨울)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         -560,
         300
       ],
-      "notes": "DA 입찰 마감(10:00 CT) 전에 결과가 나오도록 08:00 CT 실행"
+      "notes": "Free 티어 기준. 서버 웨이크업(1~3분)을 감안해 Starter 기준보다 20분 앞당겼다. DA 입찰 마감 10:00 CT 전에 결과가 나와야 한다."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.RENDER_URL }}/health",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "id": "wake1",
+      "name": "Wake Render (Free)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        460
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "notes": "Free 티어는 15분 놀면 잠든다. 이 요청이 서버를 깨운다 — 깨는 동안 연결을 붙잡고 기다리므로 타임아웃을 240초로 크게 잡았다. 여기서 깨워두면 뒤의 /predict 는 이미 깨어 있는 서버를 만나 빠르게 끝난다."
     },
     {
       "parameters": {
@@ -55,7 +75,7 @@
           ]
         },
         "options": {
-          "timeout": 20000
+          "timeout": 30000
         }
       },
       "id": "wx",
@@ -65,13 +85,16 @@
       "position": [
         -340,
         200
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "url": "={{ $env.ERCOT_FORECAST_URL }}",
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "id": "erc",
@@ -82,7 +105,10 @@
         -340,
         400
       ],
-      "notes": "ERCOT MIS 또는 사내 Azure SQL 프록시. 시간별 fc_load_mw / fc_wind_mw / fc_solar_mw 반환"
+      "notes": "ERCOT MIS 또는 사내 Azure SQL 프록시. 시간별 fc_load_mw / fc_wind_mw / fc_solar_mw 반환",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -129,12 +155,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
-          "timeout": 240000,
-          "retry": {
-            "retryOnFail": true,
-            "maxTries": 3,
-            "waitBetweenTries": 15000
-          }
+          "timeout": 300000
         }
       },
       "id": "render",
@@ -145,7 +166,10 @@
         320,
         300
       ],
-      "notes": "타임아웃 240초: Render 콜드스타트 + XGBoost 학습(10~30초) 감안"
+      "notes": "타임아웃 300초. Free 티어는 CPU 0.1 이라 학습이 로컬(1초)보다 훨씬 느리다. 앞 단계에서 서버를 깨워뒀으므로 콜드스타트는 이미 끝난 상태다.",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -226,11 +250,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
         "options": {
-          "timeout": 60000,
-          "retry": {
-            "retryOnFail": true,
-            "maxTries": 2
-          }
+          "timeout": 60000
         }
       },
       "id": "claude",
@@ -240,7 +260,10 @@
       "position": [
         1200,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -285,22 +308,6 @@
     }
   ],
   "connections": {
-    "Cron 08:00 CT (13:00 UTC)": {
-      "main": [
-        [
-          {
-            "node": "Open-Meteo 4-city",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "ERCOT Load/Wind/Solar Forecast",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Open-Meteo 4-city": {
       "main": [
         [
@@ -405,6 +412,33 @@
         [
           {
             "node": "Sheets: analysis (append)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron 12:40 UTC (07:40 CT 여름 / 06:40 겨울)": {
+      "main": [
+        [
+          {
+            "node": "Wake Render (Free)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wake Render (Free)": {
+      "main": [
+        [
+          {
+            "node": "Open-Meteo 4-city",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ERCOT Load/Wind/Solar Forecast",
             "type": "main",
             "index": 0
           }
