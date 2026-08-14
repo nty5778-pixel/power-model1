@@ -27,6 +27,11 @@ API_KEY = os.environ.get("API_KEY")  # n8n 과 공유하는 단순 인증키
 sys.path.insert(0, MODEL_DIR)
 import run_models_d1_d4_v4_weather as M  # noqa: E402
 
+# 배분 규칙 기본값 — Render 대시보드에서 ALLOC_MODE 로 덮어쓸 수 있다.
+# 기본 m1_only = 평소 RT, 모델1 점수가 문턱을 넘는 날만 DA. 근거는 M.combine_votes() 주석.
+ALLOC_MODE = os.environ.get("ALLOC_MODE", M.ALLOC_DEFAULT)
+M1_THRESHOLD = float(os.environ.get("M1_DA_THRESHOLD", M.M1_DA_THRESHOLD))
+
 app = FastAPI(title="ERCOT DA/RT Allocation", version="4.0")
 _cache: Dict[str, Any] = {"key": None, "models": None, "panel": None}
 
@@ -55,6 +60,10 @@ class PredictRequest(BaseModel):
     volume_mw: float = 100.0
     use_gate: bool = False
     run_id: Optional[str] = None
+    # 배분 규칙. 미지정이면 서버 기본값(환경변수 ALLOC_MODE, 없으면 모델 모듈 기본).
+    # n8n 이 규칙을 바꿔가며 A/B 하고 싶을 때 요청 단위로 덮어쓸 수 있게 열어둔다.
+    alloc: Optional[str] = None
+    threshold: Optional[float] = None
 
 
 def _auth(key: Optional[str]):
@@ -132,12 +141,20 @@ def predict(req: PredictRequest, x_api_key: Optional[str] = Header(None)):
 
     reg, d0_ts = M.regime_from_last(panel)      # CLI(run) 와 동일한 구성 — 두 경로가 갈리지 않게
 
-    rows = M.forecast_rows(fc, models, reg, req.volume_mw, use_gate=req.use_gate)
+    alloc = req.alloc or ALLOC_MODE
+    if alloc not in M.ALLOC_MODES:
+        raise HTTPException(400, f"alloc 은 {list(M.ALLOC_MODES)} 중 하나여야 합니다: {alloc}")
+    threshold = req.threshold if req.threshold is not None else M1_THRESHOLD
+
+    rows = M.forecast_rows(fc, models, reg, req.volume_mw, use_gate=req.use_gate,
+                           alloc=alloc, threshold=threshold)
     d0 = pd.Timestamp(d0_ts).date().isoformat()
     return {
         "run_id": req.run_id or dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
         "generated_at": dt.datetime.utcnow().isoformat(),
         "model_version": "v4-weather",
+        "alloc_mode": alloc,                    # 어떤 규칙으로 낸 배분인지 기록 (시트에 남길 것)
+        "m1_threshold": threshold,
         "d0_last_actual": d0,
         "regime": {"prc_low_r7": reg["prc_low_r7"], "da_med": reg["da_med"]},
         "weather_missing_days": n_missing_wx,   # >0 이면 그 날은 날씨 피처·오버레이 없이 산출됨
@@ -166,7 +183,11 @@ def score(rows: List[ScoreRow], x_api_key: Optional[str] = Header(None)):
     d["pred_da_cheap"] = d.DA_fraction > 0.5
     d["actual_da_cheap"] = d.DART > 0
     d["hit"] = d.pred_da_cheap == d.actual_da_cheap
-    big = d[d.DART.abs() >= 5]
+    big5 = d[d.DART.abs() >= 5]
+    # |DART| >= $20 인 날이 진짜 관측 지표다. walk-forward 531일에서 절약액의 대부분이
+    # 이 30일(전체의 5.6%)에서 나왔고, 그 날들에서만 모델이 '아무것도 안 하기'를 이겼다
+    # (모델 60.0% vs 항상RT 40.0%). 전체 적중률은 오히려 항상RT 가 높아서 판단 기준이 못 된다.
+    big20 = d[d.DART.abs() >= 20]
     return {
         "n_days": int(len(d)),
         "cost_blended": round(float(d.blended.mean()), 3),
@@ -176,8 +197,12 @@ def score(rows: List[ScoreRow], x_api_key: Optional[str] = Header(None)):
         "vs_da": round(float(d.vs_da.mean()), 3),
         "cost_std": round(float(d.blended.std()), 3),
         "hit_rate_all": round(float(d.hit.mean() * 100), 1),
-        "hit_rate_big5": (round(float(big.hit.mean() * 100), 1) if len(big) >= 5 else None),
-        "n_big5": int(len(big)),
+        "hit_rate_big5": (round(float(big5.hit.mean() * 100), 1) if len(big5) >= 5 else None),
+        "n_big5": int(len(big5)),
+        # --- 핵심 감시 지표 ---
+        "hit_rate_big20": (round(float(big20.hit.mean() * 100), 1) if len(big20) >= 5 else None),
+        "n_big20": int(len(big20)),
+        "vs_rt_big20": (round(float(big20.vs_rt.mean()), 3) if len(big20) else None),
         "mean_da_fraction": round(float(d.DA_fraction.mean()), 3),
         "detail": d.round(3).to_dict("records"),
     }

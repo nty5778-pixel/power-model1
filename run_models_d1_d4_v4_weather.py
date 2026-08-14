@@ -1,4 +1,4 @@
-"""
+﻿"""
 run_models_d1_d4.py  —  ERCOT DA/RT 구매비중 산출기 (모델 1~4 통합)
 ===================================================================
 같은 폴더의 CSV로 모델 1~4를 학습하고, 다가오는 D+1~D+4 각 날에 대해
@@ -7,7 +7,10 @@ run_models_d1_d4.py  —  ERCOT DA/RT 구매비중 산출기 (모델 1~4 통합)
   - 모델 2: 예상 DA 평균가격 + 비싼날 여부
   - 모델 3: reserve/수급 스트레스 Hard Gate (기본 OFF; --use_gate 로만 활성. 백테스트상 역효과)
   - 모델 4: Houston basis premium 확률
-을 평가하고, 4모델 25% 동등가중 앙상블로 DA/RT 비중을 정해 CSV로 출력한다.
+을 평가하고, 배분 규칙(combine_votes)에 따라 DA/RT 비중을 정해 CSV로 출력한다.
+기본 규칙은 m1_only — 평소 RT, 모델 1 점수가 0.50 을 넘는 날만 DA.
+(세 표를 1/3씩 평균하던 기존 ensemble 은 --alloc ensemble 로 남아 있다. 백테스트 531일에서
+ ensemble 은 100% RT 대비 연 -18만달러 손해, m1_only 는 +30만달러 절약이었다.)
 
 [입력 파일 — 같은 폴더에 둘 것]
   1) ERCOT_Main_*.csv   : 과거 실측+예보 (학습/최근 regime 계산용)  ← 이미 보유
@@ -48,7 +51,15 @@ warnings.filterwarnings("ignore")
 
 # ---------- 같은 폴더에서 입력 파일 자동 탐색 (유연·대소문자 무시) ----------
 def list_csvs(folder):
-    fs = glob.glob(os.path.join(folder, "*.csv")) + glob.glob(os.path.join(folder, "*.CSV"))
+    """폴더 안의 표 형식 데이터 파일. 확장자가 .txt 여도 내용이 CSV 면 받아들인다.
+
+    (항목1) 날씨가 'Weather Data.txt' 로 배포된 적이 있는데, *.csv 만 스캔하던 탓에
+    파일이 통째로 무시되어 t_anom 이 전 구간 결측 → 날씨 피처와 오버레이가 조용히
+    비활성됐다. 확장자 관례는 소스마다 달라지므로 스캔 쪽을 넓히는 게 근본적이다.
+    """
+    fs = []
+    for p in ("*.csv", "*.CSV", "*.txt", "*.TXT"):
+        fs += glob.glob(os.path.join(folder, p))
     return sorted(set(fs))
 
 def pick_csv(csvs, keys, exclude=()):
@@ -62,10 +73,21 @@ def pick_csv(csvs, keys, exclude=()):
     return None
 
 
-# ---------- 날씨: 도시별 CSV → 4-city 평균 → 계절 기준선 → anomaly ----------
+# ---------- 날씨: 도시별 파일 → 지역 평균 → 평년 대비 편차(anomaly) ----------
+# 숫자로 강제할 날씨 컬럼. 제공자가 30년 평년(normal_*)이나 편차(*_departure_f)를
+# 함께 주면 그쪽을 우선 쓴다 — 자체 산출 평년은 표본이 2.5년뿐이라 얇다.
+_WX_NUM = ("temp_mean_f", "temp_max_f", "temp_mean_departure_f", "temp_max_departure_f",
+           "normal_temp_mean_f", "normal_temp_max_f")
+
+
 def _weather_frame(csvs):
-    """temp_mean_f 컬럼이 있는 CSV 를 전부 날씨로 인식(과거+예보 자동 합침).
-    반환: date, temp_mean_f, (temp_max_f), doy. 없으면 None."""
+    """temp_mean_f + date 를 가진 파일을 전부 날씨로 인식(과거+예보 자동 합침).
+
+    (항목4) 같은 날짜가 여러 번 실린 소스를 위해 '실측 > 예보, 동률이면 최신 run' 순으로
+    정렬한 뒤 마지막 행만 남긴다. 갱신할 때마다 run_id 를 달리해 append 하는 시트가 그렇다.
+    정렬 없이 keep='last' 만 하면 오래된 예보가 최신 실측을 덮어쓸 수 있다.
+    반환: date, temp_mean_f, (temp_max_f / 평년 / 편차 컬럼), doy. 없으면 None.
+    """
     parts = []
     for f in csvs:
         try:
@@ -79,12 +101,20 @@ def _weather_frame(csvs):
     w = pd.concat(parts, ignore_index=True)
     w["date"] = pd.to_datetime(w["date"], errors="coerce")
     w = w.dropna(subset=["date"])
-    # 도시가 여러 개면 평균(도시 컬럼 없으면 그대로)
-    agg = {"temp_mean_f": "mean"}
-    if "temp_max_f" in w.columns:
-        agg["temp_max_f"] = "mean"
+    for c in _WX_NUM:
+        if c in w.columns:
+            w[c] = pd.to_numeric(w[c], errors="coerce")
+
+    w["_actual"] = ((w["data_type"].astype(str).str.lower() == "actual").astype(int)
+                    if "data_type" in w.columns else 0)
+    runcol = next((c for c in ("run_id", "run_date") if c in w.columns), None)
+    w["_run"] = w[runcol].astype(str) if runcol else ""
+    key = ["date"] + (["region"] if "region" in w.columns else [])
+    w = (w.sort_values(key + ["_actual", "_run"])
+           .drop_duplicates(subset=key, keep="last"))
+
+    agg = {c: "mean" for c in _WX_NUM if c in w.columns}   # 도시/지역이 여럿이면 평균
     W = w.groupby("date").agg(agg).reset_index().sort_values("date")
-    W = W.drop_duplicates(subset=["date"], keep="last")
     W["doy"] = W.date.dt.dayofyear
     return W
 
@@ -99,32 +129,67 @@ def _doy_norm(W, col):
     return s
 
 
+def _normal_doy(W, col, dep_col, normal_col):
+    """day-of-year → 평년값 표. (항목3) 출처 우선순위:
+
+      1) normal_* 컬럼            제공자가 준 평년값 (예: 1991-2020 NOAA 30년)
+      2) 실측 − *_departure_f     편차만 줬으면 평년을 역산
+      3) 보유 데이터 day-of-year 평균 (표본 2.5년 → 얇음. 1·2가 없을 때만)
+
+    1·2 로 채우지 못한 날짜(doy)는 3 으로 메운다. 편차 컬럼을 그대로 t_anom 에
+    쓰지 않고 '평년값'으로 되돌려 쓰는 이유는, 과거 파일(편차 없음)과 신규 시트
+    (편차 있음)가 섞였을 때 기준이 날짜마다 달라지는 것을 막기 위해서다.
+    반환: (Series(doy→F) 또는 None, 출처 설명)
+    """
+    if col not in W.columns or W[col].isna().all():
+        return None, "없음"
+    obs, how = None, None
+    if normal_col in W.columns and W[normal_col].notna().any():
+        obs, how = W[normal_col], f"제공 평년값({normal_col})"
+    elif dep_col in W.columns and W[dep_col].notna().any():
+        obs, how = W[col] - W[dep_col], f"제공 편차({dep_col})에서 역산"
+
+    self_norm = _doy_norm(W, col)
+    if obs is None:
+        return self_norm, "자체 산출(보유 데이터 day-of-year 평균)"
+    given = obs.groupby(W.doy).mean().dropna()
+    filled = self_norm.copy()
+    filled.loc[given.index] = given
+    n_gap = int(len(filled) - len(given))
+    return filled, how + (f" + 미제공 {n_gap}일은 자체 산출" if n_gap else "")
+
+
 def weather_normals(csvs):
     """예보일의 anomaly 를 계산하기 위한 평년값 표.
 
-    과거 CSV 에 없는 '미래 날짜'의 t_anom 을 서버가 직접 구할 수 있게 한다.
+    과거 파일에 없는 '미래 날짜'의 t_anom 을 서버가 직접 구할 수 있게 한다.
     (예보 기온 − 그 날짜의 평년값). 없으면 None.
     반환: {"mean": Series(doy→F), "max": Series(doy→F) 또는 None}
     """
     W = _weather_frame(csvs)
     if W is None:
         return None
-    return {"mean": _doy_norm(W, "temp_mean_f"),
-            "max": _doy_norm(W, "temp_max_f") if "temp_max_f" in W.columns else None}
+    mean, _ = _normal_doy(W, "temp_mean_f", "temp_mean_departure_f", "normal_temp_mean_f")
+    mx, _ = _normal_doy(W, "temp_max_f", "temp_max_departure_f", "normal_temp_max_f")
+    return {"mean": mean, "max": mx}
 
 
-def load_weather(csvs):
-    """날씨 CSV → 날짜별 기온 anomaly.
+def load_weather(csvs, verbose=True):
+    """날씨 파일 → 날짜별 기온 anomaly.
+
+    절대기온은 계절을 무시해 "7월 89F(평범)"과 "1월 89F(이상)"를 구분 못한다.
+    그래서 평년 대비 편차로 바꿔서 쓴다. 평년값 출처는 _normal_doy() 참조.
     반환: date, t_anom(평년比 편차,+더움), t_anom_abs, t_anom_max. 없으면 None."""
     W = _weather_frame(csvs)
     if W is None:
         return None
-    # 계절 기준선(day-of-year 평균 + 15일 스무딩) 대비 편차.
-    # 절대기온은 계절을 무시해 "7월 89F(평범)"과 "1월 89F(이상)"를 구분 못한다.
-    W["t_anom"] = W.temp_mean_f - W.doy.map(_doy_norm(W, "temp_mean_f"))
+    nmean, src = _normal_doy(W, "temp_mean_f", "temp_mean_departure_f", "normal_temp_mean_f")
+    nmax, _ = _normal_doy(W, "temp_max_f", "temp_max_departure_f", "normal_temp_max_f")
+    W["t_anom"] = W.temp_mean_f - W.doy.map(nmean)
     W["t_anom_abs"] = W.t_anom.abs()
-    W["t_anom_max"] = (W.temp_max_f - W.doy.map(_doy_norm(W, "temp_max_f"))
-                       if "temp_max_f" in W.columns else np.nan)
+    W["t_anom_max"] = (W.temp_max_f - W.doy.map(nmax)) if nmax is not None else np.nan
+    if verbose:
+        print(f"  평년 기준: {src}")
     return W[["date", "t_anom", "t_anom_abs", "t_anom_max"]]
 
 
@@ -143,12 +208,26 @@ NEEDLES = dict(
     act_solar=("Solar", "Actual - Generation"), act_wind=("Wind", "Actual - Generation"),
     env_act_nl=("ENV: Actual - Net Load",), prc=("PRC",))
 
+# (항목1) 필수 컬럼을 '실제로 쓰이는 것' 으로 좁힌다.
+#   기존에는 NEEDLES 11개를 전부 요구했는데, act_load/act_solar/act_wind 는 ENV 모드에서
+#   읽히기만 하고 어떤 피처에도 들어가지 않았고, prc 는 기본 OFF 인 M3 게이트 전용이다.
+#   ERCOT API 로 옮기면서 안 쓰는 항목까지 받아오지 않아도 되게 요구사항을 명확히 한다.
+CORE = ["DA", "RT_LZ", "RT_HB", "fc_load", "fc_solar", "fc_wind"]   # 가격·예보: 항상 필수
+NL_NEEDS = dict(env=["env_act_nl"],                                 # 순부하 산출 방식별 추가
+                direct=["act_load", "act_wind", "act_solar"])
+OPTIONAL = ["prc"]                                                  # 없으면 M3 게이트만 비활성
 
-def is_ercot_history(path):
-    """과거 학습데이터 CSV 인가? — NEEDLES 컬럼을 '전부' 갖춰야 인정.
+
+def required_keys(netload="env"):
+    """이 설정에서 반드시 있어야 하는 NEEDLES 키 목록."""
+    return CORE + NL_NEEDS[netload]
+
+
+def is_ercot_history(path, netload="env"):
+    """과거 학습데이터 파일인가? — 필수 컬럼을 '전부' 갖춰야 인정.
 
     'DA LMP 컬럼 보유' 만으로 판별하면 Congesiton_*.csv(존별 부하/지역별 발전) 가 함께 잡힌다.
-    그 파일들에는 fc_load / ENV Net Load / PRC 가 없는데, concat 후 drop_duplicates(keep='last')
+    그 파일들에는 fc_load / Net Load / PRC 가 없는데, concat 후 drop_duplicates(keep='last')
     가 같은 타임스탬프의 정상 행을 덮어써서 핵심 피처가 통째로 NaN 이 된다(조용한 오염).
     실패는 조용한 NaN 보다 낫다 — 부족한 파일은 사유와 함께 제외한다.
     반환: (인정여부, 없는 컬럼 목록)
@@ -159,12 +238,26 @@ def is_ercot_history(path):
         return False, ["읽기실패"]
     if _col(cols, "DA LMP") is None:
         return False, []                       # 애초에 후보가 아님 — 조용히 넘김
-    missing = [k for k, nd in NEEDLES.items() if _col(cols, *nd) is None]
+    missing = [k for k in required_keys(netload) if _col(cols, *NEEDLES[k]) is None]
     return (not missing), missing
 
 
 # ---------- 과거 데이터(실측+예보) -> 시간별. 파일 여러 개 자동 병합. 가스 선택 ----------
-def load_history(ercot_files, gas):
+def load_history(ercot_files, gas, netload="env", verbose=True):
+    """과거 시간별 패널 + 가스 일별 시계열.
+
+    netload: 실측 순부하(act_netload)를 무엇으로 볼지. (항목2)
+      "env"    ENV Net Load 컬럼을 그대로 사용 (기존 기본값)
+      "direct" 부하 실측 − 풍력 − 태양광 으로 직접 계산
+
+    두 방식을 섞으면 안 된다. 예전에 'direct 우선 / ENV fallback' 이던 시절
+    2024=ENV, 2025~26=direct 로 연도마다 기준이 갈려 최대 ~17.6GW 방식차가 났다.
+    direct 는 부하 실측이 있어야 하는데 기존 소스는 2024년 부하 실측이 100% 결측이라
+    그 해가 통째로 빠진다. ERCOT API 로 직접 받으면 해소되는 문제라 선택지로 열어두되,
+    바꿀 때는 backtest_walkforward.py 로 전후를 반드시 비교할 것.
+    """
+    if netload not in NL_NEEDS:
+        raise ValueError(f"netload 는 {list(NL_NEEDS)} 중 하나여야 합니다: {netload!r}")
     if isinstance(ercot_files, str):
         ercot_files = [ercot_files]
     parts = []
@@ -177,10 +270,13 @@ def load_history(ercot_files, gas):
     raw = (raw.dropna(subset=["ts"]).drop_duplicates(subset=["ts"], keep="last")
               .sort_values("ts").reset_index(drop=True))
     pick = {k: _col(raw.columns, *nd) for k, nd in NEEDLES.items()}
-    missing = [k for k, v in pick.items() if v is None]
+    missing = [k for k in required_keys(netload) if pick[k] is None]
     if missing:
-        raise ValueError(f"필요 컬럼을 못 찾음: {missing}. 보유 컬럼: {list(raw.columns)[:6]} ...")
-    G = lambda k: pd.to_numeric(raw[pick[k]], errors="coerce")
+        raise ValueError(f"필요 컬럼을 못 찾음(netload={netload}): {missing}. "
+                         f"보유 컬럼: {list(raw.columns)[:6]} ...")
+    # 선택 컬럼(prc 등)은 없으면 NaN 으로 두고 계속 간다 — 해당 기능만 비활성된다.
+    G = lambda k: (pd.to_numeric(raw[pick[k]], errors="coerce") if pick[k] is not None
+                   else pd.Series(np.nan, index=raw.index, dtype=float))
     mn = pd.DataFrame({"ts": raw["ts"]}); mn["date"] = mn.ts.dt.normalize()
     mn["DA"] = G("DA"); mn["fc_load"] = G("fc_load"); mn["fc_solar"] = G("fc_solar").fillna(0); mn["fc_wind"] = G("fc_wind")
     mn["RT_LZ"] = G("RT_LZ"); mn["RT_HB"] = G("RT_HB")
@@ -188,13 +284,21 @@ def load_history(ercot_files, gas):
     mn["env_act_nl"] = G("env_act_nl"); mn["prc"] = G("prc")
     mn["fc_netload"] = mn.fc_load - mn.fc_wind - mn.fc_solar
     mn["ren_share"] = (mn.fc_wind + mn.fc_solar) / mn.fc_load
-    # (변경, 항목4) act net load 를 전 기간 ENV 단일 기준으로 통일.
-    #   2024 는 Actual Load 100% 결측이라 direct(L-W-S)가 아예 불가 → 방식 혼재가 생겼음.
-    #   ENV Net Load 는 3개 연도 모두 존재하고 ERCOT 공식 정산치라 direct 의 component 글리치
-    #   (최대 ~17.6GW 방식차)도 없음. 단일 기준으로 방식 불일치 제거 + 학습구간 확대.
-    mn["act_netload"] = mn.env_act_nl
+    # act net load 는 전 기간 '한 가지 기준' 으로만 만든다 (docstring 참조).
+    if netload == "direct":
+        mn["act_netload"] = mn.act_load - mn.act_wind - mn.act_solar.fillna(0)
+    else:
+        mn["act_netload"] = mn.env_act_nl
     mn["nfe"] = mn.act_netload - mn.fc_netload
     mn["hou_basis"] = mn.RT_LZ - mn.RT_HB
+    if verbose:
+        ok = int(mn.act_netload.notna().sum())
+        print(f"  순부하 기준: {netload} (유효 {ok:,}/{len(mn):,}행 = {ok/max(len(mn),1)*100:.1f}%)")
+        gap = mn[mn.act_netload.isna()]
+        if len(gap):
+            yrs = gap.ts.dt.year.value_counts().sort_index()
+            print("    ! 결측 시간대는 학습에서 빠집니다 —",
+                  ", ".join(f"{y}년 {n:,}행" for y, n in yrs.items()))
     if gas:
         gas_df = pd.read_csv(gas, skiprows=1); gas_df.columns = ["date", "gas"]
         gas_df["date"] = pd.to_datetime(gas_df["date"], errors="coerce")
@@ -375,6 +479,54 @@ def forecast_daily(fc):
 def clip01(x): return float(np.clip(x, 0, 1))
 
 
+# ---------- 배분 규칙: 세 모델의 판단 → DA 비중 ----------
+#   여기가 '유일한' 정의다. forecast_rows() 도 backtest_walkforward.py 도 이 함수를 부른다.
+#   (예전엔 백테스트가 같은 식을 따로 복제해 갖고 있어서 한쪽만 고치면 조용히 어긋났다.)
+ALLOC_MODES = ("ensemble", "m1_only")
+M1_DA_THRESHOLD = 0.50     # m1_only: 모델1 점수가 이 값을 넘는 날만 DA
+ALLOC_DEFAULT = "m1_only"  # 기본 규칙. 근거는 combine_votes() 주석의 백테스트 수치.
+
+
+def combine_votes(v1, v2, v4, mode=ALLOC_DEFAULT, threshold=M1_DA_THRESHOLD):
+    """세 모델의 판단 → 기본 DA 비중.
+
+    ensemble  세 표의 단순평균. v4 도입 이후의 기존 방식.
+    m1_only   평소 RT(0), 모델1 점수가 문턱을 넘는 날만 DA(1). 조달 실무의
+              "평소 실시간, DA 가 싼 날만 전일" 방식을 그대로 옮긴 것. (기본값)
+
+    근거 — walk-forward 531일(2025-01-10~2026-06-24), 100MW, RT 대비 연간 절약:
+        ensemble  -18만달러(손해)  |  m1_only  +30만달러(절약)   → 차이 49만달러
+        |DART|>=$20 인 날 방향 적중  40.0%  |  60.0%
+        1월(한파) 절약                 -7만  |  +166만
+    모델2는 가격 '수준', 모델4는 지역 간 가격차를 맞히는 모델이라 "DA 가 쌀까"
+    라는 질문에는 간접적이다. 평균을 내면 그 질문에 직접 답하는 모델1의 신호가 희석된다.
+    세 표의 상관이 낮다는 사실은 '평균이 이득'을 뜻하지 않는다 — 실현 원가로 재면 반대였다.
+
+    문턱 민감도(오버레이 없이): 0.40/0.45/0.48/0.50 = +25/+29/+29/+30만으로 넓게 평평하고,
+    0.52 부터 +7만 → 0.60 에서 -8만으로 꺾인다. 낮은 쪽은 안전하고 높은 쪽이 위험하다.
+    "확신이 강한 날만 사자"는 직관이 이 모델에는 통하지 않으므로 문턱을 올리지 말 것.
+
+    한계: 절약 +30만의 95% 구간은 -20만~+88만이고 손해로 끝날 확률이 13% 남아 있다.
+    표본 531일 중 |DART|>=$20 인 30일이 절약의 대부분을 만든다.
+    """
+    if mode == "m1_only":
+        return 1.0 if v1 > threshold else 0.0
+    if mode != "ensemble":
+        raise ValueError(f"alloc 은 {ALLOC_MODES} 중 하나여야 합니다: {mode!r}")
+    return clip01((v1 + v2 + v4) / 3.0)
+
+
+def allocate(v1, v2, v4, *, mode=ALLOC_DEFAULT, threshold=M1_DA_THRESHOLD,
+             gate=False, use_gate=False, anom=np.nan, wx=None, overlay=True):
+    """투표 → 최종 DA 비중. 반환: (f_da, base_da, 오버레이 사유)"""
+    base = combine_votes(v1, v2, v4, mode, threshold)
+    f = clip01(max(base, GATE_FLOOR)) if (gate and use_gate) else base
+    reason = "-"
+    if overlay and wx is not None:
+        f, reason = weather_overlay(f, anom, wx["cold"], wx["hot"])
+    return clip01(f), base, reason
+
+
 def regime_from_last(d):
     """마지막 실측일(D0)의 행에서 예보용 regime 피처를 만든다. run() 과 app.py 공용.
 
@@ -394,8 +546,12 @@ def regime_from_last(d):
                 DA_r3=f("DA_r3"), DA_r7=f("DA_r7"), DA_r14=f("DA_r14")), last["date"]
 
 
-def forecast_rows(fc, models, reg, volume_mw, use_gate=False):
-    """예보 패널 → D+1..D+N 배분 행 리스트. run() 과 API 서버가 공유."""
+def forecast_rows(fc, models, reg, volume_mw, use_gate=False,
+                  alloc=ALLOC_DEFAULT, threshold=M1_DA_THRESHOLD, overlay=True):
+    """예보 패널 → D+1..D+N 배분 행 리스트. run() 과 API 서버가 공유.
+
+    alloc: 배분 규칙. combine_votes() 참조. 바꿀 때는 backtest_walkforward.py 로 검증할 것.
+    """
     f1, mdl1 = models["m1"]; f2, mdl2 = models["m2"]; f4, mdl4 = models["m4"]
     sc = models["scales"]; gt = models["gate"]; wx = models["wx"]
     rows = []
@@ -430,19 +586,16 @@ def forecast_rows(fc, models, reg, volume_mw, use_gate=False):
         # 모델 4 (유지): Houston basis 프리미엄 확률 (이미 [0,1])
         m4 = float(mdl4.predict_proba(X[f4])[0, 1])
         v4 = clip01(m4)
-        # === 앙상블: 예측형 3모델(1·2·4) 평균이 기본 DA 비중 ===
-        base_da = clip01((v1 + v2 + v4) / 3.0)
-        # === Hard Gate: 위험 시에만 DA 하한(=RT 상한) 강제. 안전 시엔 DA 를 낮추지 않음(비대칭) ===
-        # 기본(use_gate=False): 게이트 조건은 '정보'로만 표기하고 배분엔 미적용.
-        #   백테스트상 현행 게이트는 이 시장(한파 때 DA가 오히려 폭등)에서 역효과였음.
-        gate_applied = gate and use_gate
-        f_da = clip01(max(base_da, GATE_FLOOR)) if gate_applied else base_da
-        # 날씨 레짐 오버레이 (극단 anomaly 일에만 발동)
+        # === 배분 규칙 적용 (allocate() 가 유일한 정의) ===
+        # Hard Gate 는 위험 시에만 DA 하한 강제(비대칭). 기본 use_gate=False 라 정보 표기만 한다
+        #   — 백테스트상 현행 게이트는 이 시장(한파에 DA 가 오히려 폭등)에서 역효과였다.
         anom = float(r["t_anom"]) if "t_anom" in r and pd.notna(r["t_anom"]) else np.nan
-        f_da, wx_reason = weather_overlay(f_da, anom, wx["cold"], wx["hot"])
-        f_da = clip01(f_da)
+        gate_applied = gate and use_gate
+        f_da, base_da, wx_reason = allocate(
+            v1, v2, v4, mode=alloc, threshold=threshold, gate=gate, use_gate=use_gate,
+            anom=anom, wx=wx, overlay=overlay)
         rows.append(dict(
-            horizon=f"D+{h}", date=r["date"].date(),
+            horizon=f"D+{h}", date=r["date"].date(), alloc_mode=alloc,
             M1_P_DA_cheaper=round(v1, 3),
             M2_DA_pred_USD=round(m2, 2), M2_expensive=bool(m2 > damed * 1.15),
             M3_prc_low_r7_MW=round(prc7, 0), M3_gate_signal=bool(gate),
@@ -459,7 +612,8 @@ def forecast_rows(fc, models, reg, volume_mw, use_gate=False):
 
 
 
-def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False):
+def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False, netload="env",
+        alloc=ALLOC_DEFAULT, threshold=M1_DA_THRESHOLD, overlay=True):
     csvs = list_csvs(folder)
     forecast = forecast or pick_csv(csvs, ["forecast"])
 
@@ -470,7 +624,7 @@ def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False):
         for c in csvs:
             if c == forecast:
                 continue
-            ok, missing = is_ercot_history(c)
+            ok, missing = is_ercot_history(c, netload)
             if ok:
                 ercot_files.append(c)
             elif missing:
@@ -489,7 +643,7 @@ def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False):
     wxdf = load_weather([c for c in csvs if c not in ercot_files])
     print("날씨:", f"{len(wxdf)}일 (anomaly 피처+오버레이 사용)" if wxdf is not None
           else "없음 (→ 날씨 피처/오버레이 비활성, 나머지는 정상 동작)")
-    mn, gas_df = load_history(ercot_files, gas)
+    mn, gas_df = load_history(ercot_files, gas, netload)
     d = daily_panel(mn, gas_df, wxdf)
     self_wx = wxdf
     models = train_models(d)
@@ -502,6 +656,9 @@ def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False):
     print(f"\n결정시점 D0 = {d0.date()} | 최근 reserve regime prc_low_r7 = {reg['prc_low_r7']:.0f} MW")
     print(f"M3 Hard Gate: {'ON' if use_gate else 'OFF(기본)'}  "
           f"{'' if use_gate else '— 게이트 조건은 정보로만 표기, 배분 미적용'}")
+    print("배분 규칙:", "세 모델 평균(ensemble)" if alloc == "ensemble" else
+          f"평소 RT, 모델1 > {threshold:.2f} 인 날만 DA (m1_only)",
+          "| 날씨 오버레이", "ON" if overlay else "OFF")
 
     if not forecast:
         print("\n[알림] forecast_input.csv 가 없습니다. 템플릿을 채워 다시 실행하세요.")
@@ -527,8 +684,7 @@ def run(folder, ercot, gas, forecast, out, volume_mw, use_gate=False):
         print(f"  → ERCOT_Main / 가스 CSV 를 D+1 전날까지 채운 뒤 다시 실행하세요.")
         print("!" * 70)
 
-    f1, mdl1 = models["m1"]; f2, mdl2 = models["m2"]; f4, mdl4 = models["m4"]
-    rows = forecast_rows(fc, models, reg, volume_mw, use_gate)
+    rows = forecast_rows(fc, models, reg, volume_mw, use_gate, alloc, threshold, overlay)
     res = pd.DataFrame(rows)
     path = os.path.join(out, "allocation_review.csv")
     res.to_csv(path, index=False)
@@ -546,5 +702,16 @@ if __name__ == "__main__":
     ap.add_argument("--volume_mw", type=float, default=100.0)
     ap.add_argument("--use_gate", action="store_true",
                     help="M3 Hard Gate 사용(기본 off). 백테스트상 현행 설계는 이 시장에서 역효과였음.")
+    ap.add_argument("--netload", choices=["env", "direct"], default="env",
+                    help="실측 순부하 산출: env=ENV Net Load 컬럼, "
+                         "direct=부하-풍력-태양광 직접 계산. 바꾸면 반드시 백테스트로 전후 비교할 것.")
+    ap.add_argument("--alloc", choices=list(ALLOC_MODES), default=ALLOC_DEFAULT,
+                    help="배분 규칙. ensemble=세 모델 평균(기존), "
+                         "m1_only=평소 RT + 모델1 신호일만 DA. combine_votes() 주석 참조.")
+    ap.add_argument("--threshold", type=float, default=M1_DA_THRESHOLD,
+                    help="m1_only 에서 DA 로 전환할 모델1 점수 문턱 (기본 0.50)")
+    ap.add_argument("--no_overlay", action="store_true",
+                    help="날씨 레짐 오버레이 비활성")
     a = ap.parse_args()
-    run(a.folder, a.ercot, a.gas, a.forecast, a.out, a.volume_mw, a.use_gate)
+    run(a.folder, a.ercot, a.gas, a.forecast, a.out, a.volume_mw, a.use_gate, a.netload,
+        a.alloc, a.threshold, not a.no_overlay)

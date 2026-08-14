@@ -149,7 +149,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 모델 응답을 시트 1행/horizon 으로 평탄화.\nconst r = $input.all()[0].json;\nif (Number(r.weather_missing_days ?? 0) > 0) {\n  throw new Error(`날씨 결측 ${r.weather_missing_days}일 — M1 날씨피처/오버레이가 비활성 상태로 산출됐습니다. 조용히 기록하지 않고 중단합니다.`);\n}\nreturn r.rows.map(row => ({ json: {\n  run_id: r.run_id,\n  generated_at: r.generated_at,\n  model_version: r.model_version,\n  d0_last_actual: r.d0_last_actual,\n  horizon: row.horizon,\n  target_date: row.date,\n  M1_P_DA_cheaper: row.M1_P_DA_cheaper,\n  M2_DA_pred_USD: row.M2_DA_pred_USD,\n  M3_gate_signal: row.M3_gate_signal,\n  M3_gate_reason: row.M3_gate_reason,\n  M4_premium_prob: row.M4_premium_prob,\n  vote_M1_DA: row.vote_M1_DA,\n  vote_M2_DA: row.vote_M2_DA,\n  vote_M4_DA: row.vote_M4_DA,\n  WX_t_anom_F: row.WX_t_anom_F,\n  WX_overlay: row.WX_overlay,\n  base_DA: row.base_DA,\n  DA_fraction: row.DA_fraction,\n  RT_fraction: row.RT_fraction,\n  DA_MW: row.DA_MW,\n  RT_MW: row.RT_MW,\n  DA_actual: '',\n  RT_actual: '',\n  DART_actual: '',\n  blended_cost: '',\n  hit: ''\n}}));"
+        "jsCode": "// 모델 응답을 시트 1행/horizon 으로 평탄화.\nconst r = $input.all()[0].json;\nif (Number(r.weather_missing_days ?? 0) > 0) {\n  throw new Error(`날씨 결측 ${r.weather_missing_days}일 — M1 날씨피처/오버레이가 비활성 상태로 산출됐습니다. 조용히 기록하지 않고 중단합니다.`);\n}\nreturn r.rows.map(row => ({ json: {\n  run_id: r.run_id,\n  generated_at: r.generated_at,\n  model_version: r.model_version,\n  alloc_mode: row.alloc_mode ?? r.alloc_mode ?? '',\n  m1_threshold: r.m1_threshold ?? '',\n  d0_last_actual: r.d0_last_actual,\n  horizon: row.horizon,\n  target_date: row.date,\n  M1_P_DA_cheaper: row.M1_P_DA_cheaper,\n  M2_DA_pred_USD: row.M2_DA_pred_USD,\n  M3_gate_signal: row.M3_gate_signal,\n  M3_gate_reason: row.M3_gate_reason,\n  M4_premium_prob: row.M4_premium_prob,\n  vote_M1_DA: row.vote_M1_DA,\n  vote_M2_DA: row.vote_M2_DA,\n  vote_M4_DA: row.vote_M4_DA,\n  WX_t_anom_F: row.WX_t_anom_F,\n  WX_overlay: row.WX_overlay,\n  base_DA: row.base_DA,\n  DA_fraction: row.DA_fraction,\n  RT_fraction: row.RT_fraction,\n  DA_MW: row.DA_MW,\n  RT_MW: row.RT_MW,\n  DA_actual: '',\n  RT_actual: '',\n  DART_actual: '',\n  blended_cost: '',\n  hit: ''\n}}));"
       },
       "id": "flat",
       "name": "Flatten Rows",
@@ -190,7 +190,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Claude 에 넘길 컨텍스트 구성. 원본 수치를 그대로 주고 해석만 요청한다.\nconst rows = $('Flatten Rows').all().map(i => i.json);\nconst compact = rows.map(r => ({\n  horizon: r.horizon, date: r.target_date, DA_pct: r.DA_fraction,\n  M1: r.M1_P_DA_cheaper, M2_DA_USD: r.M2_DA_pred_USD, M4_basis: r.M4_premium_prob,\n  wx_anom_F: r.WX_t_anom_F, overlay: r.WX_overlay, gate: r.M3_gate_reason\n}));\nreturn [{ json: { run_id: rows[0].run_id, payload: JSON.stringify(compact) } }];"
+        "jsCode": "// Claude 에 넘길 컨텍스트 구성. 원본 수치를 그대로 주고 해석만 요청한다.\nconst rows = $('Flatten Rows').all().map(i => i.json);\nconst compact = rows.map(r => ({\n  horizon: r.horizon, date: r.target_date, DA_pct: r.DA_fraction,\n  alloc_mode: r.alloc_mode, m1_threshold: r.m1_threshold,\n  M1: r.M1_P_DA_cheaper, M2_DA_USD: r.M2_DA_pred_USD, M4_basis: r.M4_premium_prob,\n  wx_anom_F: r.WX_t_anom_F, overlay: r.WX_overlay, gate: r.M3_gate_reason\n}));\nreturn [{ json: { run_id: rows[0].run_id, payload: JSON.stringify(compact) } }];"
       },
       "id": "ctx",
       "name": "Build Claude Context",
@@ -224,7 +224,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  model: $env.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
         "options": {
           "timeout": 60000,
           "retry": {
