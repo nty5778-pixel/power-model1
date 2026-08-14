@@ -17,14 +17,14 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -560,
+        -1120,
         300
       ],
       "notes": "Free 티어 기준. 서버 웨이크업(1~3분)을 감안해 Starter 기준보다 20분 앞당겼다. DA 입찰 마감 10:00 CT 전에 결과가 나와야 한다."
     },
     {
       "parameters": {
-        "url": "={{ $vars.RENDER_URL }}/health",
+        "url": "https://CHANGE-ME.onrender.com/health",
         "options": {
           "timeout": 240000
         }
@@ -34,13 +34,237 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -560,
-        460
+        -920,
+        300
       ],
       "retryOnFail": true,
       "maxTries": 4,
       "waitBetweenTries": 5000,
       "notes": "Free 티어는 15분 놀면 잠든다. 이 요청이 서버를 깨운다 — 깨는 동안 연결을 붙잡고 기다리므로 타임아웃을 240초로 크게 잡았다. 여기서 깨워두면 뒤의 /predict 는 이미 깨어 있는 서버를 만나 빠르게 끝난다."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ercotb2c.b2clogin.com/ercotb2c.onmicrosoft.com/B2C_1_PUBAPI-ROPC-FLOW/oauth2/v2.0/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "password"
+            },
+            {
+              "name": "username",
+              "value": "CHANGE-ME-ERCOT-ID"
+            },
+            {
+              "name": "password",
+              "value": "CHANGE-ME-ERCOT-PW"
+            },
+            {
+              "name": "response_type",
+              "value": "id_token"
+            },
+            {
+              "name": "scope",
+              "value": "openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access"
+            },
+            {
+              "name": "client_id",
+              "value": "fec253ea-0d06-4272-a5e6-b478baeecd70"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "token",
+      "name": "ERCOT Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "ERCOT 공개 API 는 구독키(헤더)와 id_token(Bearer) 둘 다 요구한다. 여기서 id_token 을 받아 뒤 3개 노드가 쓴다. 토큰은 1시간짜리라 매 실행 새로 받는다. 아이디/비밀번호는 apiexplorer.ercot.com 가입 계정. ※ 이 두 값은 워크플로에 그대로 저장된다 — 워크플로를 외부로 내보내지 말 것."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ERCOT 공개 API 는 deliveryDate 로 조회한다. D+1~D+4 범위를 만든다.\n// n8n 서버는 UTC 라 '오늘'은 반드시 America/Chicago 기준으로 잡아야 한다.\nconst ctToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });\nconst day = n => {\n  const d = new Date(ctToday + 'T12:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n};\nreturn [{ json: { dateFrom: day(1), dateTo: day(4), ctToday } }];"
+      },
+      "id": "range",
+      "name": "Date Range (D+1~D+4)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -520,
+        300
+      ],
+      "notes": "예보 소스가 당일치를 함께 주면 그날이 D+1 로 잘못 붙는다. 조회 단계에서 잘라낸다."
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np3-565-cd/lf_by_model_weather_zone",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range (D+1~D+4)').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range (D+1~D+4)').first().json.dateTo }}"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "load",
+      "name": "ERCOT Load Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        140
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ERCOT Subscription Key"
+        }
+      },
+      "notes": "Seven-Day Load Forecast. 시스템 전체 부하 예보(MW)."
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np4-742-cd/wpp_hrly_actual_fcast_geo",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range (D+1~D+4)').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range (D+1~D+4)').first().json.dateTo }}"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "wind",
+      "name": "ERCOT Wind Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ERCOT Subscription Key"
+        }
+      },
+      "notes": "Hourly Wind Power Production - Actual vs Forecast."
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np4-737-cd/spp_hrly_avrg_actl_fcast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range (D+1~D+4)').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range (D+1~D+4)').first().json.dateTo }}"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "solar",
+      "name": "ERCOT Solar Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        460
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ERCOT Subscription Key"
+        }
+      },
+      "notes": "Hourly Solar Power Production - Actual vs Forecast."
     },
     {
       "parameters": {
@@ -83,65 +307,31 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -340,
-        200
-      ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
-    },
-    {
-      "parameters": {
-        "url": "={{ $vars.ERCOT_FORECAST_URL }}",
-        "options": {
-          "timeout": 60000
-        }
-      },
-      "id": "erc",
-      "name": "ERCOT Load/Wind/Solar Forecast",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -340,
-        400
-      ],
-      "notes": "ERCOT MIS 또는 사내 Azure SQL 프록시. 시간별 fc_load_mw / fc_wind_mw / fc_solar_mw 반환",
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
-    },
-    {
-      "parameters": {
-        "mode": "combine",
-        "combineBy": "combineAll",
-        "options": {}
-      },
-      "id": "mrg",
-      "name": "Merge Inputs",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
         -120,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "// 두 소스를 '이름'으로 직접 참조한다. Merge 결과의 순서/병합 방식에 의존하면 깨진다.\n// (예전 코드는 $input.all()[0] 을 ERCOT 로 가정했는데, Merge input 0 은 Open-Meteo 라\n//  실제로는 날씨 응답을 예보로 파싱하려다 실패했다.)\nconst ercotRaw = $('ERCOT Load/Wind/Solar Forecast').all()[0].json;\nconst wxRaw    = $('Open-Meteo 4-city').all().map(i => i.json);\n\n// ---------- 1) ERCOT 시간별 예보 -> 모델 스키마 ----------\n// 사내 소스 스키마가 다르면 이 매핑만 고치면 된다.\nconst hours = ercotRaw.hourly ?? ercotRaw.data ?? ercotRaw.rows\n              ?? (Array.isArray(ercotRaw) ? ercotRaw : []);\nconst forecast = (Array.isArray(hours) ? hours : []).map(h => ({\n  timestamp:  h.timestamp ?? h.DeliveryDate ?? h.time,\n  fc_load_mw: Number(h.load  ?? h.SystemLoad),\n  fc_wind_mw: Number(h.wind  ?? h.WindGen),\n  fc_solar_mw: Number(h.solar ?? h.SolarGen)\n})).filter(r => r.timestamp && !Number.isNaN(r.fc_load_mw));\n\nif (forecast.length < 24) {\n  throw new Error(`예보 행이 부족합니다 (${forecast.length}행). 불완전한 입력으로 배분하지 않는다.`);\n}\n\n// ---------- 2) Open-Meteo 4개 도시 시간별 기온 -> 날짜별 4-city 평균 ----------\n// 과거 학습 데이터가 'Texas 4-city average' 이므로 동일 방식으로 맞춘다:\n//   도시별로 하루 평균/최고를 낸 뒤, 그 값을 도시 간 평균한다.\n//   (전체 시간을 뭉뚱그려 max 를 잡으면 학습 때 기준보다 높아져 anomaly 가 왜곡된다.)\nconst locs = wxRaw.flatMap(x => Array.isArray(x) ? x : [x]).filter(x => x && x.hourly);\nconst perDate = {};\nfor (const loc of locs) {\n  const t = loc.hourly.time || [], v = loc.hourly.temperature_2m || [];\n  const day = {};\n  for (let i = 0; i < t.length; i++) {\n    const d = String(t[i]).slice(0, 10), x = Number(v[i]);\n    if (!d || Number.isNaN(x)) continue;\n    if (!day[d]) day[d] = { sum: 0, n: 0, max: -Infinity };\n    day[d].sum += x; day[d].n++; if (x > day[d].max) day[d].max = x;\n  }\n  for (const [d, a] of Object.entries(day)) {\n    if (a.n < 24) continue;                       // 하루가 온전히 채워진 날만\n    if (!perDate[d]) perDate[d] = { means: [], maxes: [] };\n    perDate[d].means.push(a.sum / a.n);\n    perDate[d].maxes.push(a.max);\n  }\n}\nconst avg = a => a.reduce((s, x) => s + x, 0) / a.length;\nconst weather = Object.entries(perDate)\n  .map(([date, a]) => ({ date,\n                         temp_mean_f: Number(avg(a.means).toFixed(2)),\n                         temp_max_f:  Number(avg(a.maxes).toFixed(2)) }))\n  .sort((a, b) => a.date < b.date ? -1 : 1);\n\nif (!weather.length) {\n  throw new Error('Open-Meteo 기온 파싱 실패. 날씨 없이 돌리면 M1 날씨피처와 오버레이가 죽는다.');\n}\n\nreturn [{ json: {\n  forecast,\n  weather,                                        // /predict 가 이걸로 t_anom 을 만든다\n  volume_mw: Number($vars.VOLUME_MW ?? 100),\n  use_gate: false,\n  run_id: new Date().toISOString().slice(0, 19).replace(/[-:]/g, '')\n}}];"
+        "jsCode": "// ERCOT 공개 API 3종 + Open-Meteo -> /predict 페이로드.\n//\n// ERCOT 응답은 { fields:[{name:...}], data:[[...]] } 형태다(객체 배열이 아니다).\n// 컬럼 이름은 리포트 개정 때 바뀔 수 있으므로 순서가 아니라 '이름 부분매칭'으로 찾는다\n// — 파이썬 모델의 NEEDLES 와 같은 이유다. 못 찾으면 실제 컬럼 목록을 담아 예외를 던진다.\n// 조용한 NaN 보다 시끄러운 실패가 낫다.\n\nfunction table(resp, label) {\n  const fields = (resp && resp.fields) || [];\n  const rows = (resp && resp.data) || [];\n  if (!fields.length || !rows.length) {\n    throw new Error(`${label}: ERCOT 응답이 비었습니다. 구독키/토큰 또는 조회 날짜를 확인하세요.`);\n  }\n  return { cols: fields.map(f => f.name), rows };\n}\n\nfunction idx(cols, label, what, alts) {\n  for (const a of alts) {\n    const i = cols.findIndex(c => String(c).toLowerCase().includes(a.toLowerCase()));\n    if (i >= 0) return i;\n  }\n  throw new Error(`${label}: ${what} 컬럼을 못 찾았습니다. 찾아본 이름: ${alts.join(', ')} / ` +\n                  `실제 컬럼: ${cols.join(', ')}`);\n}\n\n// hourEnding 은 소스에 따라 \"1\"..\"24\" 또는 \"0100\"..\"2400\" 로 온다. 시작시각(0~23)으로 정규화.\nfunction startHour(v) {\n  const n = parseInt(String(v).replace(':', ''), 10);\n  const he = n > 24 ? Math.floor(n / 100) : n;\n  return he - 1;\n}\nconst stamp = (d, h) => `${String(d).slice(0, 10)}T${String(h).padStart(2, '0')}:00:00`;\n\n// ---------- 부하 예보 ----------\nconst L = table($('ERCOT Load Forecast').first().json, '부하 예보');\nconst Ld = idx(L.cols, '부하 예보', '날짜', ['deliveryDate', 'date']);\nconst Lh = idx(L.cols, '부하 예보', '시간', ['hourEnding', 'hour']);\nconst Lv = idx(L.cols, '부하 예보', '시스템 전체 부하', ['systemTotal', 'systemWide', 'system_wide', 'system']);\nconst Lu = L.cols.findIndex(c => /inuse/i.test(String(c)));   // 여러 모델 중 실제 사용본 표시\n\nconst load = {};\nfor (const r of L.rows) {\n  if (Lu >= 0) {\n    const f = String(r[Lu]).toLowerCase();\n    if (f === 'false' || f === 'n' || f === '0' || f === '') continue;\n  }\n  const t = stamp(r[Ld], startHour(r[Lh]));\n  const v = Number(r[Lv]);\n  if (!Number.isNaN(v)) load[t] = v;          // 같은 키가 또 오면 최신값으로 덮는다\n}\n\n// ---------- 풍력 / 태양광 예보 ----------\n// STWPF = Short-Term Wind Power Forecast, STPPF = Short-Term PV Power Forecast.\nfunction genMap(nodeName, label, valueAlts) {\n  const T = table($(nodeName).first().json, label);\n  const d = idx(T.cols, label, '날짜', ['deliveryDate', 'date']);\n  const h = idx(T.cols, label, '시간', ['hourEnding', 'hour']);\n  const v = idx(T.cols, label, '시스템 전체 발전', valueAlts);\n  const m = {};\n  for (const r of T.rows) {\n    const x = Number(r[v]);\n    if (!Number.isNaN(x)) m[stamp(r[d], startHour(r[h]))] = x;\n  }\n  return m;\n}\nconst wind = genMap('ERCOT Wind Forecast', '풍력 예보',\n                    ['STWPF_SYSTEM_WIDE', 'stwpfSystemWide', 'systemWide', 'system_wide', 'systemTotal']);\nconst solar = genMap('ERCOT Solar Forecast', '태양광 예보',\n                     ['STPPF_SYSTEM_WIDE', 'stppfSystemWide', 'systemWide', 'system_wide', 'systemTotal']);\n\n// ---------- 시간별 예보 합치기 ----------\nconst forecast = Object.keys(load).sort().map(t => ({\n  timestamp: t,\n  fc_load_mw: load[t],\n  fc_wind_mw: wind[t] ?? 0,\n  fc_solar_mw: solar[t] ?? 0,\n}));\n\nconst days = [...new Set(forecast.map(r => r.timestamp.slice(0, 10)))].sort();\nif (forecast.length < 24) {\n  throw new Error(`D+1~D+4 예보가 부족합니다 (${forecast.length}행, 24행 이상 필요). ` +\n                  `받은 날짜: ${days.join(', ') || '없음'}. 조회 범위나 인증을 확인하세요.`);\n}\nconst noWind = forecast.filter(r => !(r.timestamp in wind)).length;\nif (noWind > forecast.length / 2) {\n  throw new Error(`풍력 예보가 ${noWind}/${forecast.length} 시간에서 비었습니다. ` +\n                  `시간 키가 안 맞는 것으로 보입니다(hourEnding 형식 확인).`);\n}\n\n// ---------- Open-Meteo 4개 도시 기온 -> 날짜별 4-city 평균 ----------\n// 학습 데이터가 'Texas 4-city average' 라 같은 방식으로 접는다:\n// 도시별 일평균/일최고를 낸 뒤 도시 간 평균. (전체를 뭉뚱그려 max 잡으면 기준이 달라진다.)\nconst wxRaw = $('Open-Meteo 4-city').all().map(i => i.json);\nconst locs = wxRaw.flatMap(x => Array.isArray(x) ? x : [x]).filter(x => x && x.hourly);\nconst perDate = {};\nfor (const loc of locs) {\n  const t = loc.hourly.time || [], v = loc.hourly.temperature_2m || [];\n  const day = {};\n  for (let i = 0; i < t.length; i++) {\n    const d = String(t[i]).slice(0, 10), x = Number(v[i]);\n    if (!d || Number.isNaN(x)) continue;\n    if (!day[d]) day[d] = { sum: 0, n: 0, max: -Infinity };\n    day[d].sum += x; day[d].n++; if (x > day[d].max) day[d].max = x;\n  }\n  for (const [d, a] of Object.entries(day)) {\n    if (a.n < 24) continue;\n    if (!perDate[d]) perDate[d] = { means: [], maxes: [] };\n    perDate[d].means.push(a.sum / a.n);\n    perDate[d].maxes.push(a.max);\n  }\n}\nconst avg = a => a.reduce((s, x) => s + x, 0) / a.length;\nconst weather = Object.entries(perDate)\n  .filter(([d]) => days.includes(d))\n  .map(([date, a]) => ({ date,\n                         temp_mean_f: Number(avg(a.means).toFixed(2)),\n                         temp_max_f: Number(avg(a.maxes).toFixed(2)) }))\n  .sort((a, b) => a.date < b.date ? -1 : 1);\n\nif (weather.length < days.length) {\n  throw new Error(`예보 ${days.length}일 중 기온이 있는 날은 ${weather.length}일뿐입니다. ` +\n                  `날씨 없이 돌리면 M1 날씨피처와 오버레이가 죽습니다.`);\n}\n\nreturn [{ json: {\n  forecast,\n  weather,\n  volume_mw: 100,\n  use_gate: false,\n  run_id: new Date().toISOString().slice(0, 19).replace(/[-:]/g, '')\n}}];"
       },
       "id": "shape",
       "name": "Shape Forecast Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        100,
+        80,
         300
-      ]
+      ],
+      "notes": "ERCOT 3종 + Open-Meteo 를 /predict 페이로드로. 컬럼은 이름 부분매칭으로 찾고, 못 찾으면 실제 컬럼 목록을 예외에 담는다 — 첫 실행에서 한 번만 맞추면 된다."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.RENDER_URL }}/predict",
+        "url": "https://CHANGE-ME.onrender.com/predict",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
@@ -156,7 +346,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        320,
+        280,
         300
       ],
       "notes": "타임아웃 300초. Free 티어는 CPU 0.1 이라 학습이 로컬(1초)보다 훨씬 느리다. 앞 단계에서 서버를 깨워뒀으므로 콜드스타트는 이미 끝난 상태다. 인증은 Credential 'Render Model API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것.",
@@ -178,7 +368,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        540,
+        480,
         300
       ]
     },
@@ -187,7 +377,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "={{ $vars.SHEET_ID }}",
+          "value": "CHANGE-ME-SHEET-ID",
           "mode": "id"
         },
         "sheetName": {
@@ -206,7 +396,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        760,
+        680,
         300
       ]
     },
@@ -219,7 +409,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        980,
+        880,
         300
       ]
     },
@@ -242,7 +432,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: $vars.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
         "options": {
           "timeout": 60000
         },
@@ -254,7 +444,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1200,
+        1080,
         300
       ],
       "retryOnFail": true,
@@ -269,14 +459,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.all()[0].json;\nconst text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nconst rows = $('Flatten Rows').all().map(i => i.json);\nreturn [{ json: {\n  run_id: $('Build Claude Context').all()[0].json.run_id,\n  logged_at: new Date().toISOString(),\n  kind: 'daily_commentary',\n  model: res.model || ($vars.CLAUDE_MODEL || 'claude-sonnet-5'),\n  target_dates: rows.map(r => r.target_date).join(','),\n  mean_DA_fraction: (rows.reduce((s,r)=>s+Number(r.DA_fraction),0)/rows.length).toFixed(3),\n  commentary: text,\n  input_tokens: res.usage?.input_tokens ?? '',\n  output_tokens: res.usage?.output_tokens ?? ''\n}}];"
+        "jsCode": "const res = $input.all()[0].json;\nconst text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nconst rows = $('Flatten Rows').all().map(i => i.json);\nreturn [{ json: {\n  run_id: $('Build Claude Context').all()[0].json.run_id,\n  logged_at: new Date().toISOString(),\n  kind: 'daily_commentary',\n  model: res.model || ('claude-sonnet-5'),\n  target_dates: rows.map(r => r.target_date).join(','),\n  mean_DA_fraction: (rows.reduce((s,r)=>s+Number(r.DA_fraction),0)/rows.length).toFixed(3),\n  commentary: text,\n  input_tokens: res.usage?.input_tokens ?? '',\n  output_tokens: res.usage?.output_tokens ?? ''\n}}];"
       },
       "id": "parse",
       "name": "Parse Claude Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1420,
+        1280,
         300
       ]
     },
@@ -285,7 +475,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "={{ $vars.SHEET_ID }}",
+          "value": "CHANGE-ME-SHEET-ID",
           "mode": "id"
         },
         "sheetName": {
@@ -304,35 +494,90 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        1640,
+        1480,
         300
       ]
     }
   ],
   "connections": {
-    "Open-Meteo 4-city": {
+    "Cron 12:40 UTC (07:40 CT 여름 / 06:40 겨울)": {
       "main": [
         [
           {
-            "node": "Merge Inputs",
+            "node": "Wake Render (Free)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "ERCOT Load/Wind/Solar Forecast": {
+    "Wake Render (Free)": {
       "main": [
         [
           {
-            "node": "Merge Inputs",
+            "node": "ERCOT Token",
             "type": "main",
-            "index": 1
+            "index": 0
           }
         ]
       ]
     },
-    "Merge Inputs": {
+    "ERCOT Token": {
+      "main": [
+        [
+          {
+            "node": "Date Range (D+1~D+4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date Range (D+1~D+4)": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Load Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Load Forecast": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Wind Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Wind Forecast": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Solar Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Solar Forecast": {
+      "main": [
+        [
+          {
+            "node": "Open-Meteo 4-city",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open-Meteo 4-city": {
       "main": [
         [
           {
@@ -414,33 +659,6 @@
         [
           {
             "node": "Sheets: analysis (append)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Cron 12:40 UTC (07:40 CT 여름 / 06:40 겨울)": {
-      "main": [
-        [
-          {
-            "node": "Wake Render (Free)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wake Render (Free)": {
-      "main": [
-        [
-          {
-            "node": "Open-Meteo 4-city",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "ERCOT Load/Wind/Solar Forecast",
             "type": "main",
             "index": 0
           }
