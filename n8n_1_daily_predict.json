@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "url": "https://CHANGE-ME.onrender.com/health",
+        "url": "https://powermodel1.onrender.com/health",
         "options": {
           "timeout": 240000
         }
@@ -56,7 +56,7 @@
             },
             {
               "name": "username",
-              "value": "CHANGE-ME-ERCOT-ID"
+              "value": "ty.noh@sk.com"
             },
             {
               "name": "password",
@@ -331,7 +331,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://CHANGE-ME.onrender.com/predict",
+        "url": "https://powermodel1.onrender.com/predict",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
@@ -377,7 +377,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "CHANGE-ME-SHEET-ID",
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
           "mode": "id"
         },
         "sheetName": {
@@ -475,7 +475,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "CHANGE-ME-SHEET-ID",
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
           "mode": "id"
         },
         "sheetName": {

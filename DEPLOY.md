@@ -2,11 +2,12 @@
 
 이 문서는 **사람이 직접 해야 하는 것**만 순서대로 적었다. 코드 쪽 준비는 끝나 있다.
 
-준비된 것: `data/`(학습 데이터), git 저장소(로컬 커밋 완료), `/health`·`/predict`·`/score` 로컬 검증 완료,
-n8n 워크플로 2개 패치 완료.
+준비된 것: `data/`(학습 데이터), GitHub 원격 연결, `/health`·`/predict`·`/score` 로컬 검증 완료,
+n8n 워크플로 2개(Render 주소·시트ID·ERCOT 아이디까지 채워진 상태),
+ERCOT 데이터는 공개 API 로 직접 연결 — **사내 소스를 기다릴 필요가 없어졌다.**
 
-아직 안 된 것: GitHub 원격 저장소, Render 서비스, Google 스프레드시트, n8n 인스턴스,
-**ERCOT 예보/정산 데이터 소스 2개**(→ §5, 이게 최대 미결 항목).
+남은 것: ① Google 스프레드시트 3탭 만들기 · ② Render 서비스 생성 ·
+③ ERCOT 무료 계정(→ §5-1) · ④ n8n 에 import 하고 **비밀값 4개 입력**(→ §4-1-1).
 
 ---
 
@@ -72,12 +73,13 @@ python check_sheet_headers.py
 
 ## 2. GitHub 원격 저장소
 
-로컬 커밋은 이미 되어 있다. 원격만 연결해 올리면 된다.
+원격은 이미 연결돼 있다(`nty5778-pixel/power-model1`). 새 커밋이 생기면 올리기만 하면 된다.
 
 ```bash
-git remote add origin https://github.com/<계정>/<저장소>.git
-git push -u origin main
+git push
 ```
+
+Render 는 push 를 감지해 자동으로 다시 배포한다.
 
 - **비공개 저장소를 권장한다.** `data/` 에 사내 데이터가 들어 있다.
 - `3rd Model/` 폴더는 `.gitignore` 로 제외돼 있다(모델이 쓰지 않는 혼잡 데이터 3MB). 로컬엔 그대로 남는다.
@@ -161,20 +163,35 @@ curl https://<서비스명>.onrender.com/health
 **Variables 는 쓰지 않는다.** 값은 워크플로 파일에 직접 들어 있고, API 키만 Credential 로 뺐다
 (여러 노드가 공유하고 평문 노출도 피하기 위해서다).
 
-### 4-1. import 전에 파일에서 찾아 바꾸기
+### 4-1. 파일에 이미 들어 있는 값
 
-두 JSON 파일을 텍스트 편집기로 열고 아래 4개를 **찾아 바꾸기** 한다. import 는 그 뒤에.
+주소·시트ID·ERCOT 아이디는 **이미 채워져 있다.** 그대로 import 하면 된다.
 
-| 찾을 문자열 | 바꿀 값 | 나오는 곳 |
-|---|---|---|
-| `CHANGE-ME.onrender.com` | `<서비스명>.onrender.com` (§3 주소, `https://` 와 `/` 는 이미 붙어 있음) | 4곳 |
-| `CHANGE-ME-SHEET-ID` | §1 에서 메모한 시트 ID | 6곳 |
-| `CHANGE-ME-ERCOT-ID` | ERCOT API 계정 아이디 (→ §5) | 2곳 |
-| `CHANGE-ME-ERCOT-PW` | ERCOT API 계정 비밀번호 (→ §5) | 2곳 |
+| 값 | 들어간 내용 |
+|---|---|
+| Render 주소 | `https://powermodel1.onrender.com` |
+| 시트 ID | `1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24` |
+| ERCOT 아이디 | `ty.noh@sk.com` |
+| 거래 규모 | `100` MW |
+| Claude 모델 | `claude-sonnet-5` |
 
-⚠️ **ERCOT 아이디/비밀번호는 워크플로에 그대로 저장된다.** ERCOT 공개 API 는 토큰을
-아이디·비밀번호로 받는 방식(ROPC)이라 요청 본문에 들어가야 하고, n8n Credential 로는
-헤더만 처리할 수 있어 다른 방법이 없다. **워크플로를 외부로 내보내거나 공유하지 말 것.**
+바꿔야 할 때는 두 JSON 파일에서 해당 문자열을 찾아 바꾸면 된다
+(주소 4곳, 시트ID 6곳, 아이디 2곳).
+
+### 4-1-1. n8n 에서 직접 입력할 비밀값 4가지
+
+파일에 넣지 않았다. **n8n 화면에서 넣는다.**
+
+| 값 | 어디에 넣나 |
+|---|---|
+| **ERCOT 비밀번호** | 두 워크플로의 **`ERCOT Token`** 노드 → Body Parameters → `password` (지금 `CHANGE-ME-ERCOT-PW`) |
+| **ERCOT 구독키** | Credential `ERCOT Subscription Key` (아래 4-2) |
+| **Render API 키** | Credential `Render Model API` (아래 4-2) |
+| **Claude API 키** | Credential `Anthropic API` (아래 4-2) |
+
+⚠️ **ERCOT 비밀번호만은 Credential 로 뺄 수 없다.** ERCOT 공개 API 는 토큰을 아이디·비밀번호로
+받는 방식(ROPC)이라 요청 **본문**에 들어가야 하는데, n8n Credential 은 헤더만 다룬다.
+입력하고 나면 워크플로 안에 저장되므로 **워크플로를 외부로 내보내거나 공유하지 말 것.**
 
 ### 4-2. Credentials — API 키 3개
 

@@ -27,7 +27,7 @@
         "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "CHANGE-ME-SHEET-ID",
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
           "mode": "id"
         },
         "sheetName": {
@@ -103,7 +103,7 @@
             },
             {
               "name": "username",
-              "value": "CHANGE-ME-ERCOT-ID"
+              "value": "ty.noh@sk.com"
             },
             {
               "name": "password",
@@ -272,7 +272,7 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "CHANGE-ME-SHEET-ID",
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
           "mode": "id"
         },
         "sheetName": {
@@ -322,7 +322,7 @@
     },
     {
       "parameters": {
-        "url": "https://CHANGE-ME.onrender.com/health",
+        "url": "https://powermodel1.onrender.com/health",
         "options": {
           "timeout": 240000
         }
@@ -345,7 +345,7 @@
         "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "CHANGE-ME-SHEET-ID",
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
           "mode": "id"
         },
         "sheetName": {
@@ -380,7 +380,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://CHANGE-ME.onrender.com/score",
+        "url": "https://powermodel1.onrender.com/score",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
@@ -483,7 +483,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "CHANGE-ME-SHEET-ID",
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
           "mode": "id"
         },
         "sheetName": {
