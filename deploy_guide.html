@@ -1,0 +1,639 @@
+<title>ERCOT 모델 배포 안내서</title>
+<style>
+  :root {
+    --ground:#F4F7F7; --surface:#FFFFFF; --surface-2:#EDF2F2;
+    --ink:#101619; --ink-muted:#56646A; --ink-faint:#7C8B90;
+    --rule:#D9E2E2; --rule-strong:#B9C7C8;
+    --accent:#0B6A70; --accent-ink:#08484D; --accent-soft:#E0EFEF;
+    --ok:#1F6F43; --ok-soft:#E3F1E8;
+    --warn:#8A5A00; --warn-soft:#F7EEDC;
+    --blocked:#A32C22; --blocked-soft:#F8E7E4;
+    --shadow:0 1px 2px rgba(16,22,25,.05), 0 8px 24px -12px rgba(16,22,25,.14);
+    --font-display:"Segoe UI Variable Display","Segoe UI",Pretendard,"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+    --font-body:"Segoe UI Variable Text","Segoe UI",Pretendard,"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+    --font-mono:"Cascadia Code","Cascadia Mono",Consolas,ui-monospace,monospace;
+    --step:clamp(1.5rem,3vw,2.25rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0E1315; --surface:#161D1F; --surface-2:#1D2528;
+      --ink:#E7EDED; --ink-muted:#9BA9AC; --ink-faint:#77878B;
+      --rule:#283235; --rule-strong:#3A4749;
+      --accent:#5FC3C9; --accent-ink:#9BDCDF; --accent-soft:#12302F;
+      --ok:#5CB483; --ok-soft:#142A1E;
+      --warn:#D9AA5C; --warn-soft:#2E2415;
+      --blocked:#E58275; --blocked-soft:#331916;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0E1315; --surface:#161D1F; --surface-2:#1D2528;
+    --ink:#E7EDED; --ink-muted:#9BA9AC; --ink-faint:#77878B;
+    --rule:#283235; --rule-strong:#3A4749;
+    --accent:#5FC3C9; --accent-ink:#9BDCDF; --accent-soft:#12302F;
+    --ok:#5CB483; --ok-soft:#142A1E;
+    --warn:#D9AA5C; --warn-soft:#2E2415;
+    --blocked:#E58275; --blocked-soft:#331916;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.7);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--font-body);
+         font-size:16px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:60rem; margin:0 auto; padding:clamp(1.75rem,5vw,4rem) clamp(1rem,4vw,2.5rem) 6rem;
+          display:flex; flex-direction:column; gap:var(--step); }
+
+  .masthead { display:flex; flex-direction:column; gap:.75rem; }
+  .eyebrow { font-family:var(--font-mono); font-size:.75rem; letter-spacing:.14em;
+             text-transform:uppercase; color:var(--accent); margin:0; }
+  h1 { font-family:var(--font-display); font-size:clamp(1.9rem,4.6vw,2.9rem); line-height:1.12;
+       letter-spacing:-.02em; font-weight:650; margin:0; text-wrap:balance; }
+  .standfirst { margin:0; max-width:46rem; color:var(--ink-muted); font-size:1.0625rem; }
+
+  .status { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:1px;
+            background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden; }
+  .status > div { background:var(--surface); padding:1rem 1.15rem; }
+  .status dt { font-family:var(--font-mono); font-size:.7rem; letter-spacing:.1em;
+               text-transform:uppercase; color:var(--ink-faint); margin:0 0 .35rem; }
+  .status dd { margin:0; font-size:.95rem; line-height:1.45; }
+  .status .big { font-family:var(--font-display); font-size:1.4rem; font-weight:650;
+                 letter-spacing:-.01em; font-variant-numeric:tabular-nums; }
+  .tone-ok{color:var(--ok);} .tone-warn{color:var(--warn);} .tone-blocked{color:var(--blocked);}
+
+  .note { border-radius:10px; padding:1rem 1.15rem; display:flex; flex-direction:column; gap:.4rem;
+          border:1px solid var(--rule); background:var(--surface); }
+  .note h3 { margin:0; font-family:var(--font-display); font-size:.95rem; font-weight:650; letter-spacing:-.005em; }
+  .note p { margin:0; font-size:.93rem; color:var(--ink-muted); }
+  .note.blocked{background:var(--blocked-soft);border-color:color-mix(in srgb,var(--blocked) 32%,transparent);}
+  .note.blocked h3{color:var(--blocked);}
+  .note.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 34%,transparent);}
+  .note.warn h3{color:var(--warn);}
+  .note.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 30%,transparent);}
+  .note.ok h3{color:var(--ok);}
+
+  .sec-head { display:flex; align-items:baseline; gap:.75rem;
+              border-bottom:1px solid var(--rule-strong); padding-bottom:.5rem; }
+  .sec-head h2 { font-family:var(--font-display); font-size:1.3rem; font-weight:650;
+                 letter-spacing:-.015em; margin:0; }
+  .sec-head .meta { margin-left:auto; font-family:var(--font-mono); font-size:.72rem;
+                    letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); }
+
+  ol.steps { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1.25rem; }
+  .step { background:var(--surface); border:1px solid var(--rule); border-radius:12px;
+          box-shadow:var(--shadow); overflow:hidden; transition:border-color .18s ease; }
+  .step.done { border-color:color-mix(in srgb,var(--ok) 45%,var(--rule)); }
+  .step.done .step-head { background:var(--ok-soft); }
+  .step-head { display:flex; align-items:flex-start; gap:.9rem; padding:1rem 1.25rem;
+               border-bottom:1px solid var(--rule); background:var(--surface-2); transition:background .18s ease; }
+  .num { flex:none; width:2rem; height:2rem; display:grid; place-items:center; border-radius:50%;
+         background:var(--accent); color:var(--surface); font-family:var(--font-mono);
+         font-size:.9rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .step.done .num { background:var(--ok); }
+  .step-head h3 { margin:0; font-family:var(--font-display); font-size:1.12rem; font-weight:650;
+                  letter-spacing:-.012em; line-height:1.3; }
+  .step-head .sub { margin:.15rem 0 0; font-size:.9rem; color:var(--ink-muted); }
+  .step-head .txt { min-width:0; }
+  .check { margin-left:auto; flex:none; display:inline-flex; align-items:center; gap:.45rem;
+           font-size:.82rem; color:var(--ink-muted); cursor:pointer; user-select:none;
+           padding:.3rem .5rem; border-radius:6px; white-space:nowrap; }
+  .check:hover { background:color-mix(in srgb,var(--accent) 9%,transparent); }
+  .check input { width:1.05rem; height:1.05rem; accent-color:var(--ok); cursor:pointer; }
+  .check:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+  .step-body { padding:1.15rem 1.25rem 1.35rem; display:flex; flex-direction:column; gap:.95rem; }
+  .step-body > p { margin:0; }
+  .step-body ol, .step-body ul { margin:0; padding-left:1.35rem; display:flex; flex-direction:column; gap:.5rem; }
+  .step-body li { padding-left:.15rem; }
+  .why { font-size:.92rem; color:var(--ink-muted); border-left:2px solid var(--accent); padding-left:.85rem; }
+  .success { display:flex; gap:.6rem; align-items:flex-start; background:var(--ok-soft);
+             border-radius:8px; padding:.75rem .9rem; font-size:.92rem; }
+  .success b { color:var(--ok); font-weight:650; }
+  .success .tick { color:var(--ok); font-weight:700; flex:none; }
+
+  .snippet { border:1px solid var(--rule); border-radius:8px; overflow:hidden; background:var(--surface-2); }
+  .snippet-bar { display:flex; align-items:center; gap:.75rem; padding:.45rem .55rem .45rem .8rem;
+                 border-bottom:1px solid var(--rule); font-family:var(--font-mono); font-size:.72rem;
+                 letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint); }
+  .snippet-bar .cols { margin-left:auto; font-variant-numeric:tabular-nums; text-transform:none; letter-spacing:0; }
+  button.copy { font-family:var(--font-mono); font-size:.72rem; letter-spacing:.04em;
+                border:1px solid var(--rule-strong); background:var(--surface); color:var(--ink);
+                border-radius:5px; padding:.25rem .6rem; cursor:pointer;
+                transition:background .15s ease,border-color .15s ease; }
+  button.copy:hover { background:var(--accent-soft); border-color:var(--accent); }
+  button.copy:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button.copy[data-state="done"] { color:var(--ok); border-color:var(--ok); }
+  button.copy[data-state="fail"] { color:var(--warn); border-color:var(--warn); }
+  .snippet pre { margin:0; padding:.8rem; overflow-x:auto; font-family:var(--font-mono);
+                 font-size:.78rem; line-height:1.5; white-space:pre; tab-size:4; }
+  code.inline { font-family:var(--font-mono); font-size:.86em; background:var(--accent-soft);
+                color:var(--accent-ink); padding:.1em .38em; border-radius:4px; word-break:break-word; }
+
+  .tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:10px; background:var(--surface); }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; min-width:34rem; }
+  th, td { text-align:left; padding:.6rem .85rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+  thead th { font-family:var(--font-mono); font-size:.7rem; letter-spacing:.09em; text-transform:uppercase;
+             color:var(--ink-faint); background:var(--surface-2); white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:0; }
+  td code, th code { font-family:var(--font-mono); font-size:.84em; }
+  .pill { display:inline-block; font-family:var(--font-mono); font-size:.68rem; letter-spacing:.06em;
+          text-transform:uppercase; padding:.15rem .45rem; border-radius:999px; white-space:nowrap; }
+  .pill.need { background:var(--warn-soft); color:var(--warn); }
+  .pill.opt { background:var(--surface-2); color:var(--ink-faint); }
+  .pill.done { background:var(--ok-soft); color:var(--ok); }
+  a { color:var(--accent); }
+  footer { border-top:1px solid var(--rule); padding-top:1.1rem; font-size:.85rem;
+           color:var(--ink-faint); display:flex; flex-direction:column; gap:.3rem; }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
+  @media (max-width: 34rem) { .step-head { flex-wrap:wrap; } .check { margin-left:0; width:100%; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">ERCOT LZ_HOUSTON · DA/RT 조달</p>
+    <h1>모델을 매일 자동으로 돌리기까지</h1>
+    <p class="standfirst">
+      코드와 설정값은 준비됐습니다. 남은 건 계정을 연결하고 <b>비밀값 4개를 넣는 일</b>입니다.
+      순서대로 하시면 되고, 단계마다 <b>“이렇게 보이면 성공”</b>을 적어뒀습니다.
+      중간에 덮으셔도 체크는 남습니다.
+    </p>
+  </header>
+
+  <dl class="status">
+    <div>
+      <dt>예상 소요</dt>
+      <dd class="big">1 ~ 2시간</dd>
+      <dd style="color:var(--ink-muted);font-size:.88rem">ERCOT 가입 승인 대기 제외</dd>
+    </div>
+    <div>
+      <dt>월 비용</dt>
+      <dd class="big">$0</dd>
+      <dd style="color:var(--ink-muted);font-size:.88rem">Render Free + Claude API 사용량만</dd>
+    </div>
+    <div>
+      <dt>미리 만들 계정</dt>
+      <dd class="big tone-warn">ERCOT</dd>
+      <dd style="color:var(--ink-muted);font-size:.88rem">무료. 승인 대기가 있을 수 있습니다</dd>
+    </div>
+  </dl>
+
+  <div class="note warn">
+    <h3>시작하기 전에 — ERCOT 계정부터 신청해 두세요</h3>
+    <p>
+      사내 데이터 주소를 기다릴 필요가 없어졌습니다. <b>ERCOT 공개 API</b>를 직접 부르도록
+      바꿨습니다. 대신 무료 계정 하나가 필요한데, 승인에 시간이 걸릴 수 있어
+      <b>지금 신청해 두시는 게 좋습니다.</b>
+    </p>
+    <p style="margin-top:.35rem">
+      <a href="https://apiexplorer.ercot.com">apiexplorer.ercot.com</a> 가입 →
+      <b>Public API</b> 구독 → <b>아이디 · 비밀번호 · 구독키</b> 세 가지를 받습니다.
+      아이디는 <code class="inline">ty.noh@sk.com</code> 으로 이미 넣어뒀습니다.
+    </p>
+  </div>
+
+  <div class="note ok">
+    <h3>이미 채워둔 값 — 따로 입력하지 않으셔도 됩니다</h3>
+    <p>
+      서버 주소 <code class="inline">powermodel1.onrender.com</code> ·
+      시트 ID · ERCOT 아이디 · 거래 규모 100MW · Claude 모델.
+      워크플로 파일 안에 들어 있습니다.
+    </p>
+  </div>
+
+  <section>
+    <div class="sec-head">
+      <h2>필요한 계정</h2>
+      <span class="meta">시작 전 준비</span>
+    </div>
+    <div class="tablewrap" style="margin-top:.9rem">
+      <table>
+        <thead><tr><th>서비스</th><th>용도</th><th>비용</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>Google</b></td><td>결과를 기록할 스프레드시트</td><td>무료</td><td><span class="pill need">필수</span></td></tr>
+          <tr><td><b>GitHub</b></td><td>코드 보관 — Render가 여기서 가져갑니다</td><td>무료</td><td><span class="pill done">연결됨</span></td></tr>
+          <tr><td><b>Render</b></td><td>모델이 실제로 도는 서버</td><td>무료 (Free 플랜)</td><td><span class="pill need">필수</span></td></tr>
+          <tr><td><b>ERCOT API</b></td><td>부하·풍력·태양광 예보와 정산 가격</td><td>무료</td><td><span class="pill need">필수</span></td></tr>
+          <tr><td><b>n8n</b></td><td>매일 정해진 시각에 자동 실행</td><td>플랜에 따름</td><td><span class="pill need">필수</span></td></tr>
+          <tr><td><b>Anthropic API</b></td><td>매일 결과 해설 한 문단</td><td>사용량 과금</td><td><span class="pill opt">해설 안 쓰면 생략</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>배포 5단계</h2><span class="meta">순서대로 진행</span></div>
+  </section>
+
+  <ol class="steps">
+
+    <li class="step" id="s1">
+      <div class="step-head">
+        <span class="num">1</span>
+        <div class="txt"><h3>결과를 기록할 스프레드시트 만들기</h3>
+          <p class="sub">Google 스프레드시트 · 약 10분</p></div>
+        <label class="check"><input type="checkbox" data-step="1"> 완료</label>
+      </div>
+      <div class="step-body">
+        <p class="why">
+          모델이 매일 낸 판단과 다음 날 실제 가격이 여기 쌓입니다.
+          <b>서버는 아무것도 저장하지 않습니다</b> — 재시작하면 지워지는 구조라서요.
+        </p>
+        <ol>
+          <li>이미 만들어 두신 스프레드시트를 엽니다
+            (ID <code class="inline">1d1p7Y5V…cbU24</code>).</li>
+          <li>시트 탭 <b>3개</b>를 만들고 이름을 정확히 이렇게 붙입니다 —
+            <code class="inline">predictions</code>, <code class="inline">analysis</code>,
+            <code class="inline">lookback</code>.</li>
+          <li>각 탭의 <b>A1 칸</b>에 아래를 붙여넣습니다. 칸이 자동으로 나뉩니다.</li>
+        </ol>
+
+        <div class="snippet">
+          <div class="snippet-bar"><span>predictions 탭 · A1</span><span class="cols">28열</span>
+            <button class="copy" type="button">복사</button></div>
+          <pre>run_id	generated_at	model_version	alloc_mode	m1_threshold	d0_last_actual	horizon	target_date	M1_P_DA_cheaper	M2_DA_pred_USD	M3_gate_signal	M3_gate_reason	M4_premium_prob	vote_M1_DA	vote_M2_DA	vote_M4_DA	WX_t_anom_F	WX_overlay	base_DA	DA_fraction	RT_fraction	DA_MW	RT_MW	DA_actual	RT_actual	DART_actual	blended_cost	hit</pre>
+        </div>
+
+        <div class="snippet">
+          <div class="snippet-bar"><span>analysis 탭 · A1</span><span class="cols">9열</span>
+            <button class="copy" type="button">복사</button></div>
+          <pre>run_id	logged_at	kind	model	target_dates	mean_DA_fraction	commentary	input_tokens	output_tokens</pre>
+        </div>
+
+        <div class="snippet">
+          <div class="snippet-bar"><span>lookback 탭 · A1</span><span class="cols">20열</span>
+            <button class="copy" type="button">복사</button></div>
+          <pre>logged_at	kind	window_all_days	cost_blended	cost_all_rt	cost_all_da	vs_rt	vs_da	cost_std	hit_rate_all	hit_rate_big5	n_big5	hit_rate_big20	n_big20	vs_rt_big20	mean_da_fraction	recent30_hit	recent30_vs_rt	alert	commentary</pre>
+        </div>
+
+        <div class="note warn">
+          <h3>철자가 하나라도 다르면 그 칸은 조용히 비어 있게 됩니다</h3>
+          <p>오류가 나지 않고 그냥 기록이 안 됩니다. 실제로 <code class="inline">alloc_mode</code> 칸이
+             이렇게 통째로 빠져 있던 적이 있습니다. <b>붙여넣기로 하시고 직접 타이핑하지 마세요.</b></p>
+        </div>
+
+        <div class="success"><span class="tick">✓</span>
+          <span><b>이렇게 되면 성공</b> — 탭 3개, 각 탭 1행에 제목이 채워져 있다.</span></div>
+      </div>
+    </li>
+
+    <li class="step" id="s2">
+      <div class="step-head">
+        <span class="num">2</span>
+        <div class="txt"><h3>코드를 GitHub에 올리기</h3><p class="sub">이미 연결됨 · 약 1분</p></div>
+        <label class="check"><input type="checkbox" data-step="2"> 완료</label>
+      </div>
+      <div class="step-body">
+        <p class="why">Render는 GitHub에서 코드를 가져다 씁니다. 나중에 데이터를 갱신할 때도
+          여기에 올리기만 하면 서버가 알아서 새로 뜹니다.</p>
+        <p>저장소 연결은 끝났습니다(<code class="inline">nty5778-pixel/power-model1</code>).
+          새 변경분만 올리시면 됩니다.</p>
+        <div class="snippet">
+          <div class="snippet-bar"><span>터미널</span><button class="copy" type="button">복사</button></div>
+          <pre>git push</pre>
+        </div>
+        <div class="note warn">
+          <h3>저장소가 Private인지 확인해 주세요</h3>
+          <p><code class="inline">data</code> 폴더에 사내 거래 데이터가 들어 있습니다.
+             GitHub 저장소 이름 옆에 <b>Private</b> 표시가 있어야 합니다.</p>
+        </div>
+        <div class="success"><span class="tick">✓</span>
+          <span><b>이렇게 되면 성공</b> — GitHub 화면에 <code>data</code> 폴더와 <code>app.py</code>가 보인다.</span></div>
+      </div>
+    </li>
+
+    <li class="step" id="s3">
+      <div class="step-head">
+        <span class="num">3</span>
+        <div class="txt"><h3>서버 띄우기</h3><p class="sub">Render · 약 15분 (빌드 대기 포함)</p></div>
+        <label class="check"><input type="checkbox" data-step="3"> 완료</label>
+      </div>
+      <div class="step-body">
+        <p class="why">여기가 실제로 모델이 도는 곳입니다. 매일 아침 “내일 DA로 살까 RT로 살까”를
+          계산해서 답을 돌려줍니다.</p>
+
+        <div class="note warn">
+          <h3>설정이 자동으로 잡히지 않습니다 — 직접 넣으셔야 합니다</h3>
+          <p>저장소에 설정 파일이 있지만, <b>New → Web Service</b>로 만들면 Render가 그 파일을
+             읽지 않습니다. 아래 값을 화면에 직접 입력해 주세요.</p>
+        </div>
+
+        <ol>
+          <li>Render에서 <b>New → Web Service</b>를 누르고 저장소를 고릅니다.</li>
+          <li>아래 두 칸을 채웁니다.</li>
+        </ol>
+
+        <div class="snippet">
+          <div class="snippet-bar"><span>Build Command</span><button class="copy" type="button">복사</button></div>
+          <pre>pip install -r requirements.txt</pre>
+        </div>
+        <div class="snippet">
+          <div class="snippet-bar"><span>Start Command</span><button class="copy" type="button">복사</button></div>
+          <pre>uvicorn app:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 120</pre>
+        </div>
+
+        <ol start="3">
+          <li>나머지 — <b>Language</b> <code class="inline">Python 3</code> ·
+            <b>Branch</b> <code class="inline">main</code> ·
+            <b>Health Check Path</b> <code class="inline">/health</code> ·
+            <b>Instance Type</b> <code class="inline">Free</code> ·
+            <b>서비스 이름</b> <code class="inline">powermodel1</code>
+            <br><span style="color:var(--ink-muted);font-size:.9rem">
+              이름이 달라지면 주소가 바뀌어서 워크플로 파일도 고쳐야 합니다.</span></li>
+          <li>환경변수 4개를 넣습니다.</li>
+        </ol>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>이름</th><th>값</th><th>왜</th></tr></thead>
+            <tbody>
+              <tr><td><code>API_KEY</code></td><td>아무 긴 임의 문자열</td>
+                  <td><b>4단계에서 똑같은 값을 씁니다. 복사해 두세요</b></td></tr>
+              <tr><td><code>DATA_DIR</code></td><td><code>/opt/render/project/src/data</code></td>
+                  <td>없으면 학습 데이터를 못 찾습니다</td></tr>
+              <tr><td><code>PYTHON_VERSION</code></td><td><code>3.11</code></td><td></td></tr>
+              <tr><td><code>OMP_NUM_THREADS</code></td><td><code>1</code></td>
+                  <td>Free는 CPU가 작아서, 이걸 넣어야 오히려 빨라집니다</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <ol start="5">
+          <li>배포가 끝나면 <code class="inline">https://powermodel1.onrender.com/health</code> 를 열어봅니다.
+            <br><span style="color:var(--ink-muted);font-size:.9rem">처음 열 때 1~3분 걸릴 수 있습니다. 정상입니다.</span></li>
+        </ol>
+
+        <div class="note">
+          <h3>Free 플랜은 15분 쉬면 잠듭니다 — 대비해 뒀습니다</h3>
+          <p>잠든 뒤 첫 요청은 서버가 깨어날 때까지 1~3분 기다립니다. 그래서 4단계 자동 실행에
+             <b>“서버 먼저 깨우기”</b> 단계를 넣고, 실행 시각도 20분 앞당겨 뒀습니다.
+             입찰 마감(10시)에는 영향이 없습니다.</p>
+          <p style="margin-top:.35rem">메모리는 실측 <b>188MB</b>로 한도 512MB 안에 넉넉히 들어갑니다.
+             나중에 더 빠른 응답이 필요해지면 Starter($7/월)로 바꾸기만 하면 되고,
+             자동 실행은 그대로 두셔도 됩니다.</p>
+        </div>
+
+        <div class="note">
+          <h3>선택 — 넣지 않으면 기본값으로 돕니다</h3>
+          <p><code class="inline">ALLOC_MODE</code>(기본 <code class="inline">m1_only</code>)와
+             <code class="inline">M1_DA_THRESHOLD</code>(기본 <code class="inline">0.5</code>)는
+             <b>매수 판단 규칙 자체</b>입니다. 검증을 거쳐 정한 값이라 손대실 이유가 없습니다.
+             바꾸시려면 반드시 백테스트로 먼저 확인하세요.</p>
+        </div>
+
+        <div class="success"><span class="tick">✓</span>
+          <span><b>이렇게 되면 성공</b> — 브라우저에 <code>{"ok":true, ...}</code> 가 보인다.</span></div>
+      </div>
+    </li>
+
+    <li class="step" id="s4">
+      <div class="step-head">
+        <span class="num">4</span>
+        <div class="txt"><h3>매일 자동 실행 연결하기</h3><p class="sub">n8n · 약 20분</p></div>
+        <label class="check"><input type="checkbox" data-step="4"> 완료</label>
+      </div>
+      <div class="step-body">
+        <p class="why">n8n이 매일 정해진 시각에 ERCOT 예보와 날씨를 모아 서버에 보내고,
+          답을 받아 시트에 적습니다. 다음 날에는 실제 가격을 채워 채점합니다.</p>
+
+        <ol>
+          <li>워크플로 파일 2개를 불러옵니다 —
+            <code class="inline">n8n_1_daily_predict.json</code>,
+            <code class="inline">n8n_2_backfill_lookback.json</code>.</li>
+          <li><b>ERCOT 비밀번호를 넣습니다.</b> 두 워크플로 각각에서
+            <code class="inline">ERCOT Token</code> 노드를 열고, Body Parameters의
+            <code class="inline">password</code> 칸에 있는
+            <code class="inline">CHANGE-ME-ERCOT-PW</code>를 실제 비밀번호로 바꿉니다.
+            <br><span style="color:var(--ink-muted);font-size:.9rem">두 파일 모두 해야 합니다.</span></li>
+          <li>Credential 4개를 만듭니다. <b>이름을 아래와 정확히 같게</b> 만들면 자동으로 연결됩니다.</li>
+        </ol>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Credential 이름</th><th>종류</th><th>넣을 값</th></tr></thead>
+            <tbody>
+              <tr><td><code>ERCOT Subscription Key</code></td><td>Header Auth</td>
+                  <td>Name <code>Ocp-Apim-Subscription-Key</code><br>Value = ERCOT 구독키</td></tr>
+              <tr><td><code>Render Model API</code></td><td>Header Auth</td>
+                  <td>Name <code>x-api-key</code><br>Value = 3단계 <code>API_KEY</code>와 <b>똑같은 값</b></td></tr>
+              <tr><td><code>Anthropic API</code></td><td>Header Auth</td>
+                  <td>Name <code>x-api-key</code><br>Value = Claude API 키</td></tr>
+              <tr><td>(이름 자유)</td><td>Google Sheets</td>
+                  <td>OAuth2 또는 서비스 계정 — 시트 노드 6곳에 지정</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note warn">
+          <h3>ERCOT 비밀번호는 워크플로 안에 저장됩니다</h3>
+          <p>ERCOT은 아이디·비밀번호로 이용권을 받는 방식이라 요청 내용에 직접 들어가야 하고,
+             n8n의 비밀 보관함(Credential)으로는 뺄 수가 없습니다.
+             <b>워크플로를 외부로 내보내거나 공유하지 마세요.</b></p>
+        </div>
+
+        <p style="color:var(--ink-muted);font-size:.9rem">
+          서비스 계정으로 시트에 연결하시는 경우, 1단계 스프레드시트를 그 계정 이메일에
+          <b>편집 권한</b>으로 공유해야 합니다.</p>
+
+        <p><b>실행 시각</b> — 이미 설정돼 있습니다. 확인만 하세요.</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>하는 일</th><th>현지 시각</th><th>왜 그때인가</th></tr></thead>
+            <tbody>
+              <tr><td>내일 배분 계산</td><td>여름 07:40 / 겨울 06:40 CT</td>
+                  <td><b>DA 입찰 마감 10시 전</b>에 답이 나와야 합니다. 서버 깨우는 시간 20분 포함</td></tr>
+              <tr><td>어제 실적 채우기</td><td>여름 11:00 / 겨울 10:00 CT</td><td>정산이 확정된 뒤</td></tr>
+              <tr><td>주간 성적 정리</td><td>월요일</td><td>그날 실적을 채운 40분 뒤</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note">
+          <h3>맨 앞에 “서버 깨우기” 단계가 들어 있습니다</h3>
+          <p>Free 플랜은 15분 쉬면 잠들기 때문에, 본 작업 전에 서버를 먼저 깨웁니다.
+             이 단계가 <b>몇 분씩 걸리는 건 정상</b>입니다 — 실패가 아니라 기다리는 중입니다.</p>
+          <p style="margin-top:.35rem">실적을 채우는 두 번째 작업에는 깨우기가 없습니다.
+             그 작업은 서버를 쓰지 않고 ERCOT 정산가와 시트만 다루기 때문입니다.</p>
+        </div>
+
+        <div class="success"><span class="tick">✓</span>
+          <span><b>이렇게 되면 성공</b> — 워크플로 2개가 보이고, 빨간 경고 표시가 없다.</span></div>
+      </div>
+    </li>
+
+    <li class="step" id="s5">
+      <div class="step-head">
+        <span class="num">5</span>
+        <div class="txt"><h3>첫 실행 확인하기</h3><p class="sub">가장 중요한 단계 · 약 10분</p></div>
+        <label class="check"><input type="checkbox" data-step="5"> 완료</label>
+      </div>
+      <div class="step-body">
+        <p class="why">여기서 눈으로 3가지만 확인하면 조용히 잘못 도는 경우를 거의 다 잡을 수 있습니다.
+          자동으로 돌기 시작하면 아무도 안 보게 되니 지금 확인하세요.</p>
+
+        <ol>
+          <li>n8n에서 첫 번째 워크플로를 <b>수동으로</b> 한 번 실행합니다.</li>
+          <li><code class="inline">predictions</code> 시트에 <b>4줄</b>(내일부터 나흘치)이 생겼는지 봅니다.</li>
+          <li>그 4줄에서 아래 3칸을 확인합니다.</li>
+        </ol>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>확인할 칸</th><th>정상</th><th>비어 있거나 이상하면</th></tr></thead>
+            <tbody>
+              <tr><td><code>alloc_mode</code></td><td><code>m1_only</code></td>
+                  <td>시트 제목 철자가 틀렸습니다 → 1단계</td></tr>
+              <tr><td><code>WX_t_anom_F</code></td><td>숫자 (예 <code>1.6</code>)</td>
+                  <td>날씨가 안 넘어왔습니다 → 워크플로 확인</td></tr>
+              <tr><td><code>DA_fraction</code></td><td><code>0</code> 또는 <code>1</code></td>
+                  <td>아래 설명 참조</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note">
+          <h3>DA 비중이 0이나 1로만 나오는 건 정상입니다</h3>
+          <p>지금 규칙은 <b>“평소엔 RT, 신호가 뜬 날만 전량 DA”</b>입니다.
+             다만 <b>이상기온인 날에는 중간값이 나옵니다</b> — 이때는 같은 줄
+             <code class="inline">WX_overlay</code> 칸에 <code class="inline">hot+9F</code> 같은 표시가 있습니다.
+             지난 531일 기준 <b>20일에 한 번꼴</b>(4.1%)입니다.</p>
+          <p style="margin-top:.35rem"><code class="inline">WX_overlay</code>가 <b>비어 있는데</b>
+             중간값이면 규칙 설정이 잘못된 것입니다.</p>
+        </div>
+
+        <div class="note warn">
+          <h3>실제로 매수하실 때</h3>
+          <p><code class="inline">DA_MW</code>가 <code class="inline">36.7</code>처럼 소수로 나옵니다.
+             <b>MW 단위로 반올림해서 집행</b>하시면 되고, 1MW 미만이면 그냥 전량 RT로 하세요.
+             이 정도 차이는 성과에 영향이 없습니다.</p>
+        </div>
+
+        <ol start="4">
+          <li>다음 날 두 번째 워크플로를 수동 실행해 <code class="inline">DA_actual</code>이 채워지는지 봅니다.</li>
+          <li>기록이 20일 넘게 쌓이면 주간 성적이 <code class="inline">lookback</code> 시트에 자동으로 남습니다.</li>
+        </ol>
+
+        <div class="success"><span class="tick">✓</span>
+          <span><b>이렇게 되면 성공</b> — 시트에 4줄이 쌓였고, 위 3칸이 모두 정상이다.</span></div>
+      </div>
+    </li>
+  </ol>
+
+  <section>
+    <div class="sec-head"><h2>막히면 여기를 보세요</h2><span class="meta">증상 → 원인</span></div>
+    <div class="tablewrap" style="margin-top:.9rem">
+      <table>
+        <thead><tr><th>화면에 뜨는 말</th><th>무슨 뜻이고 어떻게 하나</th></tr></thead>
+        <tbody>
+          <tr><td>“서버 깨우기”가 몇 분씩 걸림</td>
+              <td>정상입니다. Free 플랜이라 잠든 서버가 일어나는 중입니다(1~3분).</td></tr>
+          <tr><td>깨우기가 4번 다 실패</td>
+              <td>서버가 아예 안 뜨는 상태입니다. Render 화면의 <b>Logs</b> 탭을 열어 오류를 확인하세요.</td></tr>
+          <tr><td>토큰 노드 <code>400</code>/<code>401</code></td>
+              <td>ERCOT 아이디·비밀번호 오타입니다. <code>ERCOT Token</code> 노드를 확인하세요.</td></tr>
+          <tr><td>ERCOT 데이터 노드 <code>401</code></td>
+              <td>Credential <code>ERCOT Subscription Key</code>의 값 또는 헤더 이름을 확인하세요.</td></tr>
+          <tr><td><code>… 컬럼을 못 찾았습니다</code></td>
+              <td>ERCOT이 컬럼 이름을 바꿨습니다. <b>오류 메시지에 실제 이름이 그대로 찍힙니다</b> —
+                  그 이름을 <code>Shape Forecast Payload</code> 노드의 후보 목록에 한 줄 추가하면 됩니다.
+                  한 번만 하면 됩니다.</td></tr>
+          <tr><td><code>D+1~D+4 예보가 부족합니다</code></td>
+              <td>조회한 날짜에 ERCOT 데이터가 없습니다. 오류에 찍힌 “받은 날짜”를 확인하세요.</td></tr>
+          <tr><td><code>날씨 결측 N일</code></td>
+              <td>서버가 기온을 못 받았습니다. 일부러 멈춘 것입니다 —
+                  날씨 없이 계산하면 판단 정확도가 크게 떨어집니다.</td></tr>
+          <tr><td><code>/predict</code> <code>401</code></td>
+              <td>Render의 <code>API_KEY</code>와 Credential <code>Render Model API</code> 값이 다릅니다.</td></tr>
+          <tr><td><code>no ERCOT history CSV</code></td>
+              <td>학습 데이터가 서버에 안 올라갔습니다. GitHub에 <code>data</code> 폴더가 있는지 확인하세요.</td></tr>
+          <tr><td>첫 요청만 느림</td>
+              <td>정상입니다. 요청할 때마다 모델을 새로 학습합니다. 같은 날 두 번째부터는 즉시 답합니다.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>돌기 시작한 뒤에</h2><span class="meta">운영</span></div>
+    <div style="display:flex;flex-direction:column;gap:.85rem;margin-top:.9rem">
+      <div class="note ok">
+        <h3>매주 볼 칸은 딱 하나입니다</h3>
+        <p><code class="inline">lookback</code> 시트의 <b><code class="inline">hit_rate_big20</code></b> —
+           가격차가 $20 넘게 벌어진 날의 적중률입니다. 이익의 대부분이 그런 날에서 나옵니다.
+           <b>50% 아래로 떨어지면</b> 옆 <code class="inline">alert</code> 칸에
+           <code class="inline">[중요]</code>가 찍힙니다.</p>
+        <p style="margin-top:.35rem">전체 적중률(<code class="inline">hit_rate_all</code>)로는 판단하지 마세요.
+           그 숫자는 <b>아무것도 안 하고 RT만 사는 쪽이 항상 더 높게</b> 나옵니다.
+           $0.5 차이 나는 날과 $50 차이 나는 날을 똑같이 한 번으로 세기 때문입니다.</p>
+      </div>
+      <div class="note warn">
+        <h3>학습 데이터는 저절로 갱신되지 않습니다</h3>
+        <p>지금 데이터는 <b>2026년 6월 24일</b>에서 멈춰 있습니다. 시간이 갈수록 모델이 낡은 시장을
+           보게 됩니다. <b>월 1회</b> 최신 CSV로 <code class="inline">data</code> 폴더를 갱신하고
+           GitHub에 올리면 서버가 알아서 새로 뜹니다.</p>
+      </div>
+      <div class="note">
+        <h3>성적이 계절을 탑니다 — 하반기 부진을 곧바로 고장으로 읽지 마세요</h3>
+        <p>검증 결과 상반기에 잘 되고 하반기에 나빴습니다. 다만 하반기 표본이 2025년 한 해뿐이라
+           “여름엔 원래 그렇다”인지도 아직 확정되지 않았습니다.
+           <b>반기 단위로 나눠서</b> 보시고, 짧은 기간 성적으로 규칙을 바꾸지 마세요.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div>자세한 기술 내용은 저장소의 <b>DEPLOY.md</b>와 <b>README.md</b>에 있습니다.</div>
+    <div>배분 규칙을 바꾸기 전에는 <b>backtest_walkforward.py</b>로 반드시 전후를 비교하세요.</div>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var KEY = 'ercot-deploy-progress';
+    var store = {
+      read: function () { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } },
+      write: function (v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} }
+    };
+    var saved = store.read();
+    Array.prototype.forEach.call(document.querySelectorAll('.check input[data-step]'), function (box) {
+      var id = box.getAttribute('data-step');
+      var step = box.closest('.step');
+      if (saved[id]) { box.checked = true; step.classList.add('done'); }
+      box.addEventListener('change', function () {
+        step.classList.toggle('done', box.checked);
+        var cur = store.read();
+        if (box.checked) { cur[id] = 1; } else { delete cur[id]; }
+        store.write(cur);
+      });
+    });
+
+    function flash(btn, label, state) {
+      var original = btn.getAttribute('data-label') || btn.textContent;
+      btn.setAttribute('data-label', original);
+      btn.textContent = label;
+      btn.setAttribute('data-state', state);
+      setTimeout(function () { btn.textContent = original; btn.removeAttribute('data-state'); }, 1800);
+    }
+
+    Array.prototype.forEach.call(document.querySelectorAll('button.copy'), function (btn) {
+      btn.addEventListener('click', function () {
+        var pre = btn.closest('.snippet').querySelector('pre');
+        var text = pre.textContent;
+        function fallback() {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          var ok = false;
+          try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+          document.body.removeChild(ta);
+          if (ok) { flash(btn, '복사됨', 'done'); }
+          else {
+            flash(btn, '직접 선택하세요', 'fail');
+            var r = document.createRange(); r.selectNodeContents(pre);
+            var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+          }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { flash(btn, '복사됨', 'done'); }, fallback);
+        } else { fallback(); }
+      });
+    });
+  })();
+</script>
