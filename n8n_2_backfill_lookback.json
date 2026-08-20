@@ -17,7 +17,7 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -560,
+        -1000,
         200
       ],
       "notes": "전일 정산 확정 후 실적 backfill. 이 경로는 Render 를 부르지 않으므로 (정산 소스 + 시트뿐) Free 티어 웨이크업이 필요 없다."
@@ -27,7 +27,7 @@
         "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "={{ $vars.SHEET_ID }}",
+          "value": "CHANGE-ME-SHEET-ID",
           "mode": "id"
         },
         "sheetName": {
@@ -42,20 +42,20 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        -340,
+        -800,
         200
       ]
     },
     {
       "parameters": {
-        "jsCode": "// 실적이 비어 있고 target_date 가 이미 지난 D+1 행만 골라낸다.\n// (D+2~D+4 예측은 해당 날짜가 D+1 로 다시 예측되므로, 채점은 D+1 만 사용해\n//  horizon 간 중복 집계를 피한다.)\nconst rows = $input.all().map(i => i.json);\nconst today = new Date(); today.setHours(0,0,0,0);\nconst pending = rows.filter(r => {\n  if (r.horizon !== 'D+1') return false;\n  if (r.DA_actual !== '' && r.DA_actual != null) return false;\n  const d = new Date(r.target_date);\n  return d < today;\n});\nif (!pending.length) return [{ json: { skip: true, reason: 'no pending rows' } }];\nreturn pending.map(r => ({ json: { ...r, skip: false } }));"
+        "jsCode": "// 실적이 비어 있고 target_date 가 이미 지난 D+1 행만 골라낸다.\n// (D+2~D+4 는 같은 날짜가 다시 D+1 로 예측되므로, 함께 집계하면 한 날짜가 4번 반영된다.)\n// 예전에는 행마다 정산 API 를 따로 불렀는데, 여기서 날짜 '범위' 를 한 번에 만들어\n// 조회를 1회로 줄이고 뒤에서 날짜로 맞붙인다. 순서 매칭에 기대지 않아 어긋날 여지가 없다.\nconst rows = $input.all().map(i => i.json);\nconst today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }));\nconst pending = rows.filter(r => {\n  if (r.horizon !== 'D+1') return false;\n  if (r.DA_actual !== '' && r.DA_actual != null) return false;\n  return new Date(String(r.target_date).slice(0, 10)) < today;\n});\nif (!pending.length) return [{ json: { skip: true, reason: 'no pending rows' } }];\nconst dates = pending.map(r => String(r.target_date).slice(0, 10)).sort();\nreturn [{ json: { skip: false, pending, dateFrom: dates[0], dateTo: dates[dates.length - 1] } }];"
       },
       "id": "pend",
       "name": "Find Pending Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -120,
+        -600,
         200
       ]
     },
@@ -85,54 +85,186 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        100,
+        -400,
         200
       ]
     },
     {
       "parameters": {
-        "url": "={{ $vars.ERCOT_SETTLE_URL }}",
-        "sendQuery": true,
-        "queryParameters": {
+        "method": "POST",
+        "url": "https://ercotb2c.b2clogin.com/ercotb2c.onmicrosoft.com/B2C_1_PUBAPI-ROPC-FLOW/oauth2/v2.0/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
           "parameters": [
             {
-              "name": "date",
-              "value": "={{ $json.target_date }}"
+              "name": "grant_type",
+              "value": "password"
             },
             {
-              "name": "zone",
-              "value": "LZ_HOUSTON"
+              "name": "username",
+              "value": "CHANGE-ME-ERCOT-ID"
+            },
+            {
+              "name": "password",
+              "value": "CHANGE-ME-ERCOT-PW"
+            },
+            {
+              "name": "response_type",
+              "value": "id_token"
+            },
+            {
+              "name": "scope",
+              "value": "openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access"
+            },
+            {
+              "name": "client_id",
+              "value": "fec253ea-0d06-4272-a5e6-b478baeecd70"
             }
           ]
         },
         "options": {
-          "timeout": 60000
+          "timeout": 30000
         }
       },
-      "id": "settle",
-      "name": "Fetch Settlement DA/RT",
+      "id": "token2",
+      "name": "ERCOT Token",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        320,
-        120
+        -200,
+        200
       ],
-      "notes": "정산 소스는 authoritative 여야 함 — TimeSeriesExport 파생값 사용 금지",
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "notes": "구독키(헤더)와 id_token(Bearer) 둘 다 필요하다. 아이디/비밀번호는 워크플로에 저장되니 외부로 내보내지 말 것."
     },
     {
       "parameters": {
-        "jsCode": "// 예측행 + 실적가격 결합 → 채점 필드 계산\nconst pred = $('Find Pending Rows').all().map(i => i.json);\nconst settle = $input.all();\nif (settle.length !== pred.length) {\n  throw new Error(`정산 응답 ${settle.length}건 != 대기 예측행 ${pred.length}건. 순서 매칭이 어긋나면 다른 날짜에 실적이 붙는다 — 중단합니다.`);\n}\nconst out = [];\nfor (let i = 0; i < pred.length; i++) {\n  const s = $input.all()[i]?.json ?? {};\n  const DA = Number(s.DA_avg ?? s.da ?? NaN);\n  const RT = Number(s.RT_avg ?? s.rt ?? NaN);\n  if (Number.isNaN(DA) || Number.isNaN(RT)) continue;\n  const f = Number(pred[i].DA_fraction);\n  const dart = RT - DA;\n  out.push({ json: {\n    ...pred[i],\n    DA_actual: DA.toFixed(2),\n    RT_actual: RT.toFixed(2),\n    DART_actual: dart.toFixed(2),\n    blended_cost: (f*DA + (1-f)*RT).toFixed(2),\n    hit: ((f > 0.5) === (dart > 0)) ? 'Y' : 'N'\n  }});\n}\nreturn out;"
+        "url": "https://api.ercot.com/api/public-reports/np4-190-cd/dam_stlmnt_pnt_prices",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Find Pending Rows').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Find Pending Rows').first().json.dateTo }}"
+            },
+            {
+              "name": "settlementPoint",
+              "value": "LZ_HOUSTON"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "da",
+      "name": "ERCOT DA Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ERCOT Subscription Key"
+        }
+      },
+      "notes": "DAM Settlement Point Prices. LZ_HOUSTON 시간별 -> 일평균."
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np6-905-cd/spp_node_zone_hub",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Find Pending Rows').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Find Pending Rows').first().json.dateTo }}"
+            },
+            {
+              "name": "settlementPoint",
+              "value": "LZ_HOUSTON"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "rt",
+      "name": "ERCOT RT Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        280
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ERCOT Subscription Key"
+        }
+      },
+      "notes": "Settlement Point Prices (15분). LZ_HOUSTON -> 일평균. 확정 정산치여야 한다."
+    },
+    {
+      "parameters": {
+        "jsCode": "// 정산 응답(ERCOT 공개 API) + 대기 중인 예측행 -> 채점.\n// 응답은 { fields:[{name}], data:[[...]] } 이고 컬럼 이름은 개정될 수 있어 부분매칭으로 찾는다.\nfunction table(resp, label) {\n  const fields = (resp && resp.fields) || [];\n  const rows = (resp && resp.data) || [];\n  if (!fields.length || !rows.length) {\n    throw new Error(`${label}: 정산 응답이 비었습니다. 해당 날짜가 아직 확정 전이거나 인증 문제입니다.`);\n  }\n  return { cols: fields.map(f => f.name), rows };\n}\nfunction idx(cols, label, what, alts) {\n  for (const a of alts) {\n    const i = cols.findIndex(c => String(c).toLowerCase().includes(a.toLowerCase()));\n    if (i >= 0) return i;\n  }\n  throw new Error(`${label}: ${what} 컬럼을 못 찾았습니다. 찾아본 이름: ${alts.join(', ')} / 실제: ${cols.join(', ')}`);\n}\n// 날짜별 단순 평균. 모델 패널의 DA_avg / RT_avg 와 같은 방식이어야 채점이 맞는다.\nfunction dailyMean(resp, label) {\n  const T = table(resp, label);\n  const d = idx(T.cols, label, '날짜', ['deliveryDate', 'date']);\n  const p = idx(T.cols, label, '가격', ['settlementPointPrice', 'price', 'spp', 'lmp']);\n  const acc = {};\n  for (const r of T.rows) {\n    const k = String(r[d]).slice(0, 10);\n    const v = Number(r[p]);\n    if (Number.isNaN(v)) continue;\n    if (!acc[k]) acc[k] = { s: 0, n: 0 };\n    acc[k].s += v; acc[k].n++;\n  }\n  const out = {};\n  for (const [k, a] of Object.entries(acc)) out[k] = a.s / a.n;\n  return out;\n}\n\nconst da = dailyMean($('ERCOT DA Prices').first().json, 'DA 정산가');\nconst rt = dailyMean($('ERCOT RT Prices').first().json, 'RT 정산가');\nconst pending = $('Find Pending Rows').first().json.pending;\n\nconst out = [];\nconst missing = [];\nfor (const p of pending) {\n  const k = String(p.target_date).slice(0, 10);\n  if (!(k in da) || !(k in rt)) { missing.push(k); continue; }\n  const DA = da[k], RT = rt[k], dart = RT - DA;\n  const f = Number(p.DA_fraction);\n  out.push({ json: {\n    ...p,\n    DA_actual: DA.toFixed(2),\n    RT_actual: RT.toFixed(2),\n    DART_actual: dart.toFixed(2),\n    blended_cost: (f * DA + (1 - f) * RT).toFixed(2),\n    hit: ((f > 0.5) === (dart > 0)) ? 'Y' : 'N'\n  }});\n}\nif (!out.length) {\n  throw new Error(`정산가를 찾은 날짜가 없습니다. 대기중: ${pending.map(p=>p.target_date).join(', ')}`);\n}\nif (missing.length) console.log('정산 미확정으로 건너뜀:', missing.join(', '));\nreturn out;"
       },
       "id": "join",
       "name": "Join & Score",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        540,
-        120
+        200,
+        200
       ]
     },
     {
@@ -140,7 +272,7 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "={{ $vars.SHEET_ID }}",
+          "value": "CHANGE-ME-SHEET-ID",
           "mode": "id"
         },
         "sheetName": {
@@ -162,8 +294,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        760,
-        120
+        400,
+        200
       ],
       "notes": "run_id + horizon 복합키로 매칭 — append 가 아니라 update"
     },
@@ -183,17 +315,37 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -560,
-        560
+        -1000,
+        600
       ],
       "notes": "Free 티어 웨이크업 감안해 20분 앞당김."
+    },
+    {
+      "parameters": {
+        "url": "https://CHANGE-ME.onrender.com/health",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "id": "wake2",
+      "name": "Wake Render (Free) 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        600
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "notes": "Free 티어는 15분 놀면 잠든다. 이 요청이 서버를 깨운다 — 깨는 동안 연결을 붙잡고 기다리므로 타임아웃을 240초로 크게 잡았다. 여기서 깨워두면 뒤의 /predict 는 이미 깨어 있는 서버를 만나 빠르게 끝난다."
     },
     {
       "parameters": {
         "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "={{ $vars.SHEET_ID }}",
+          "value": "CHANGE-ME-SHEET-ID",
           "mode": "id"
         },
         "sheetName": {
@@ -208,8 +360,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        -340,
-        560
+        -600,
+        600
       ]
     },
     {
@@ -221,14 +373,14 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -120,
-        560
+        -400,
+        600
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.RENDER_URL }}/score",
+        "url": "https://CHANGE-ME.onrender.com/score",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
@@ -243,8 +395,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        100,
-        560
+        -200,
+        600
       ],
       "retryOnFail": true,
       "maxTries": 4,
@@ -265,8 +417,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        320,
-        560
+        0,
+        600
       ]
     },
     {
@@ -288,7 +440,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  model: $vars.CLAUDE_MODEL || 'claude-sonnet-5',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-5',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
         "options": {
           "timeout": 60000
         },
@@ -300,8 +452,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        540,
-        560
+        200,
+        600
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -322,8 +474,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        760,
-        560
+        400,
+        600
       ]
     },
     {
@@ -331,7 +483,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "={{ $vars.SHEET_ID }}",
+          "value": "CHANGE-ME-SHEET-ID",
           "mode": "id"
         },
         "sheetName": {
@@ -350,32 +502,23 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        980,
-        560
+        600,
+        600
       ]
-    },
-    {
-      "parameters": {
-        "url": "={{ $vars.RENDER_URL }}/health",
-        "options": {
-          "timeout": 240000
-        }
-      },
-      "id": "wake2",
-      "name": "Wake Render (Free) 2",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -560,
-        700
-      ],
-      "retryOnFail": true,
-      "maxTries": 4,
-      "waitBetweenTries": 5000,
-      "notes": "Free 티어는 15분 놀면 잠든다. 이 요청이 서버를 깨운다 — 깨는 동안 연결을 붙잡고 기다리므로 타임아웃을 240초로 크게 잡았다. 여기서 깨워두면 뒤의 /predict 는 이미 깨어 있는 서버를 만나 빠르게 끝난다."
     }
   ],
   "connections": {
+    "Cron Daily 16:00 UTC (11:00 CT 여름 / 10:00 겨울)": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read predictions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Sheets: read predictions": {
       "main": [
         [
@@ -402,7 +545,7 @@
       "main": [
         [
           {
-            "node": "Fetch Settlement DA/RT",
+            "node": "ERCOT Token",
             "type": "main",
             "index": 0
           }
@@ -410,7 +553,29 @@
         []
       ]
     },
-    "Fetch Settlement DA/RT": {
+    "ERCOT Token": {
+      "main": [
+        [
+          {
+            "node": "ERCOT DA Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT DA Prices": {
+      "main": [
+        [
+          {
+            "node": "ERCOT RT Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT RT Prices": {
       "main": [
         [
           {
@@ -426,6 +591,28 @@
         [
           {
             "node": "Sheets: update actuals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Weekly Mon 16:40 UTC": {
+      "main": [
+        [
+          {
+            "node": "Wake Render (Free) 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wake Render (Free) 2": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read scored history",
             "type": "main",
             "index": 0
           }
@@ -492,39 +679,6 @@
         [
           {
             "node": "Sheets: lookback (append)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Cron Weekly Mon 16:40 UTC": {
-      "main": [
-        [
-          {
-            "node": "Wake Render (Free) 2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wake Render (Free) 2": {
-      "main": [
-        [
-          {
-            "node": "Sheets: read scored history",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Cron Daily 16:00 UTC (11:00 CT 여름 / 10:00 겨울)": {
-      "main": [
-        [
-          {
-            "node": "Sheets: read predictions",
             "type": "main",
             "index": 0
           }

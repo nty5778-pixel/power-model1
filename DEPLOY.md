@@ -158,48 +158,39 @@ curl https://<서비스명>.onrender.com/health
 
 ## 4. n8n (Cloud 기준)
 
-값을 넣는 곳이 **두 군데로 갈린다.** 섞으면 안 된다.
+**Variables 는 쓰지 않는다.** 값은 워크플로 파일에 직접 들어 있고, API 키만 Credential 로 뺐다
+(여러 노드가 공유하고 평문 노출도 피하기 위해서다).
 
-> **왜 나누나** — n8n Cloud 는 서버 환경변수(`$env`) 접근을 막는다. 자체 설치에서만 되는
-> 기능이라 Cloud 에서는 **Variables**(`$vars`)를 쓴다. 그런데 Variables 는 **평문**이고
-> 워크스페이스 멤버에게 그대로 보인다 — n8n 문서도 비밀값은 Credentials 를 쓰라고 한다.
-> 그래서 **주소·설정은 Variables, API 키는 Credentials** 로 나눴다.
-> (자체 설치로 옮기게 되면 `$vars.` 를 `$env.` 로 되돌리고 OS 환경변수에 넣으면 된다.)
+### 4-1. import 전에 파일에서 찾아 바꾸기
 
-### 4-1. Variables — 비밀이 아닌 설정값
+두 JSON 파일을 텍스트 편집기로 열고 아래 4개를 **찾아 바꾸기** 한다. import 는 그 뒤에.
 
-**Settings → Variables** 에서 추가한다.
+| 찾을 문자열 | 바꿀 값 | 나오는 곳 |
+|---|---|---|
+| `CHANGE-ME.onrender.com` | `<서비스명>.onrender.com` (§3 주소, `https://` 와 `/` 는 이미 붙어 있음) | 4곳 |
+| `CHANGE-ME-SHEET-ID` | §1 에서 메모한 시트 ID | 6곳 |
+| `CHANGE-ME-ERCOT-ID` | ERCOT API 계정 아이디 (→ §5) | 2곳 |
+| `CHANGE-ME-ERCOT-PW` | ERCOT API 계정 비밀번호 (→ §5) | 2곳 |
 
-| 이름 | 값 |
-|---|---|
-| `RENDER_URL` | `https://<서비스명>.onrender.com` — **끝에 `/` 없이** |
-| `SHEET_ID` | §1 에서 메모한 값 |
-| `VOLUME_MW` | `100` |
-| `CLAUDE_MODEL` | (선택) 비우면 `claude-sonnet-5` |
-| `ERCOT_FORECAST_URL` | **→ §5 참조. 아직 미정** |
-| `ERCOT_SETTLE_URL` | **→ §5 참조. 아직 미정** |
+⚠️ **ERCOT 아이디/비밀번호는 워크플로에 그대로 저장된다.** ERCOT 공개 API 는 토큰을
+아이디·비밀번호로 받는 방식(ROPC)이라 요청 본문에 들어가야 하고, n8n Credential 로는
+헤더만 처리할 수 있어 다른 방법이 없다. **워크플로를 외부로 내보내거나 공유하지 말 것.**
 
-⚠️ **API 키를 여기에 넣지 말 것.** 아래 4-2 로 간다.
+### 4-2. Credentials — API 키 3개
 
-> Variables 메뉴가 안 보이면 요금제에 그 기능이 없는 것이다. 그때는 Variables 대신
-> 각 노드에 값을 직접 입력해도 된다(비밀값이 아니므로 안전). 표현식
-> `{{ $vars.RENDER_URL }}` 자리에 주소를 그대로 타이핑하면 된다.
-
-### 4-2. Credentials — API 키
-
-**Credentials → Add credential** 에서 만든다. 워크플로에는 이미 이 이름으로 연결돼 있으니
+**Credentials → Add credential.** 워크플로에 이미 이 이름으로 연결돼 있으니
 **이름을 정확히 같게** 만들면 자동으로 붙는다.
 
-| Credential 이름 | 종류 | 설정 |
-|---|---|---|
-| `Render Model API` | Header Auth | Name `x-api-key` · Value = Render 의 `API_KEY` **와 같은 값** |
-| `Anthropic API` | Header Auth | Name `x-api-key` · Value = Claude API 키 |
-| (이름 자유) | Google Sheets OAuth2 또는 서비스 계정 | 시트 노드 4곳에 지정 |
+| Credential 이름 | 종류 | 설정 | 쓰는 곳 |
+|---|---|---|---|
+| `Render Model API` | Header Auth | Name `x-api-key` · Value = Render 의 `API_KEY` **와 같은 값** | `/predict`, `/score` |
+| `Anthropic API` | Header Auth | Name `x-api-key` · Value = Claude API 키 | Claude 호출 2곳 |
+| `ERCOT Subscription Key` | Header Auth | Name `Ocp-Apim-Subscription-Key` · Value = §5 구독키 | ERCOT 데이터 5곳 |
+| (이름 자유) | Google Sheets OAuth2 또는 서비스 계정 | | 시트 노드 6곳 |
 
 서비스 계정으로 하면 §1 스프레드시트를 그 계정 이메일에 **편집 권한**으로 공유해야 한다.
 
 > `/health`(깨우기) 노드에는 인증이 없다 — 서버도 이 경로만 인증을 요구하지 않는다.
-> 나머지 Render 호출 2곳(`/predict`, `/score`)에만 `Render Model API` 가 붙어 있다.
 
 ### 4-3. 워크플로 가져오기
 
@@ -227,20 +218,55 @@ curl https://<서비스명>.onrender.com/health
 
 ---
 
-## 5. 아직 막혀 있는 것 — ERCOT 데이터 소스 2개
+## 5. ERCOT 데이터 — 공개 API 를 직접 쓴다
 
-이것만은 코드로 해결되지 않는다. **사내 소스를 연결해야 한다.**
+사내 소스를 기다리지 않고 **ERCOT 공개 API** 를 워크플로에서 직접 호출하도록 배선했다.
+필요한 건 **무료 계정 하나**뿐이다.
 
-**`ERCOT_FORECAST_URL`** — 시간별 예보를 주는 주소. 최소 24시간 이상,
-`timestamp` / 부하 / 풍력 / 태양광을 포함해야 한다. 응답 형태가 다르면
-워크플로의 `Shape Forecast Payload` 노드 상단 매핑만 고치면 된다.
+### 5-1. 계정 만들기
 
-**`ERCOT_SETTLE_URL`** — 확정 정산 DA/RT 가격. ⚠️ **반드시 정산 확정치여야 한다.**
-TimeSeriesExport 파생값은 실제 정산치와 어긋나는 것이 확인됐고, 이걸 쓰면
-성과 지표 전체가 오염된다(HANDOFF §9-6).
+1. <https://apiexplorer.ercot.com> 에서 가입한다 (무료).
+2. **Public API** 에 구독(subscribe)하면 **구독키(Subscription Key)** 가 나온다.
+3. 준비물 3개: **아이디**, **비밀번호**, **구독키**. §4 에서 쓴다.
 
-이 둘이 연결되기 전까지 워크플로는 첫 노드에서 실패한다. 그게 의도된 동작이다 —
-불완전한 입력으로 배분을 내는 것보다 실패가 낫다.
+### 5-2. 워크플로가 부르는 엔드포인트
+
+인증이 2단계다. 아이디·비밀번호로 토큰을 받고, 그 토큰과 구독키를 함께 보낸다.
+`ERCOT Token` 노드가 매 실행 토큰을 새로 받으므로 만료를 신경 쓸 필요는 없다.
+
+| 쓰는 곳 | 리포트 | 경로 |
+|---|---|---|
+| 예측 ① | Seven-Day Load Forecast | `/np3-565-cd/lf_by_model_weather_zone` |
+| 예측 ① | Hourly Wind Power Production | `/np4-742-cd/wpp_hrly_actual_fcast_geo` |
+| 예측 ① | Hourly Solar Power Production | `/np4-737-cd/spp_hrly_avrg_actl_fcast` |
+| backfill ② | DAM Settlement Point Prices | `/np4-190-cd/dam_stlmnt_pnt_prices` |
+| backfill ② | Settlement Point Prices (15분) | `/np6-905-cd/spp_node_zone_hub` |
+
+기준 주소는 `https://api.ercot.com/api/public-reports`, 토큰은 ERCOT B2C ROPC 엔드포인트.
+
+### 5-3. 첫 실행에서 한 번은 컬럼 이름을 맞춰야 할 수 있다
+
+ERCOT 응답은 `{ fields:[{name}], data:[[...]] }` 형태이고, 컬럼 이름은 리포트 개정 때 바뀐다.
+그래서 워크플로는 **이름 부분매칭**으로 컬럼을 찾는다(파이썬 모델의 `NEEDLES` 와 같은 방식).
+못 찾으면 이런 오류를 낸다:
+
+```
+풍력 예보: 시스템 전체 발전 컬럼을 못 찾았습니다.
+  찾아본 이름: STWPF_SYSTEM_WIDE, stwpfSystemWide, systemWide, ...
+  실제 컬럼: deliveryDate, hourEnding, genCoastal, genSouth, ...
+```
+
+**실제 컬럼 목록이 오류에 그대로 찍히므로**, 맞는 이름을 `Shape Forecast Payload` 노드의
+후보 목록에 한 줄 추가하면 끝난다. 한 번만 하면 된다.
+
+### 5-4. 정산 데이터에 대한 경고 (그대로 유효)
+
+⚠️ **반드시 확정 정산치여야 한다.** 위 두 가격 리포트는 ERCOT 이 직접 내는 정산가라
+이 조건을 만족한다. 다른 소스로 바꿀 때는 반드시 확인할 것 — TimeSeriesExport 파생값은
+실제 정산치와 어긋나는 것이 확인됐고, 쓰면 성과 지표 전체가 오염된다(HANDOFF §9-6).
+
+⚠️ 당일 아침에는 **전날 정산이 아직 확정 전**일 수 있다. 그런 날짜는 건너뛰고
+다음 실행에서 다시 시도한다(`Join & Score` 가 로그에 남긴다).
 
 ---
 
@@ -261,7 +287,11 @@ TimeSeriesExport 파생값은 실제 정산치와 어긋나는 것이 확인됐�
 
 | 증상 | 원인 |
 |---|---|
-| `예보 행이 부족합니다` | `ERCOT_FORECAST_URL` 응답 형태 불일치 → Shape 노드 매핑 수정 |
+| `D+1~D+4 예보가 부족합니다` | ERCOT 조회 날짜에 데이터가 없다. 오류에 찍힌 '받은 날짜'를 확인 |
+| `... 컬럼을 못 찾았습니다` | ERCOT 컬럼 이름이 바뀌었다. 오류에 실제 컬럼이 찍힌다 → §5-3 |
+| `ERCOT 응답이 비었습니다` | 구독키 또는 토큰 문제. `ERCOT Token` 노드 실행 결과부터 확인 |
+| 토큰 노드 `401`/`400` | ERCOT 아이디·비밀번호 오타 (§4-1 의 `CHANGE-ME-ERCOT-*`) |
+| ERCOT 데이터 노드 `401` | Credential `ERCOT Subscription Key` 의 값 또는 헤더명 확인 |
 | `Open-Meteo 기온 파싱 실패` | Open-Meteo 응답 구조 변경 |
 | `날씨 결측 N일` | 서버가 예보일의 기온을 못 받았다 → payload 의 `weather` 확인 |
 | `/predict` 401 | Credential `Render Model API` 의 값 ≠ Render `API_KEY` |
