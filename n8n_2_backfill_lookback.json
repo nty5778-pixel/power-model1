@@ -322,26 +322,6 @@
     },
     {
       "parameters": {
-        "url": "https://powermodel1.onrender.com/health",
-        "options": {
-          "timeout": 240000
-        }
-      },
-      "id": "wake2",
-      "name": "Wake Render (Free) 2",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -800,
-        600
-      ],
-      "retryOnFail": true,
-      "maxTries": 4,
-      "waitBetweenTries": 5000,
-      "notes": "Free 티어는 15분 놀면 잠든다. 이 요청이 서버를 깨운다 — 깨는 동안 연결을 붙잡고 기다리므로 타임아웃을 240초로 크게 잡았다. 여기서 깨워두면 뒤의 /predict 는 이미 깨어 있는 서버를 만나 빠르게 끝난다."
-    },
-    {
-      "parameters": {
         "operation": "read",
         "documentId": {
           "__rl": true,
@@ -505,6 +485,90 @@
         600,
         600
       ]
+    },
+    {
+      "parameters": {
+        "url": "https://powermodel1.onrender.com/health",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "wake2",
+      "name": "Wake Render (Free) 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        600
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Render Free 는 잠든 동안 즉시 503 + Retry-After:5 를 준다(연결을 붙잡지 않는다). 그래서 긴 타임아웃이 아니라 재시도 루프가 필요하다. 200 이 나올 때까지 20초 간격으로 다시 두드린다."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "awake",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "awake2",
+      "name": "Awake? 2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -600,
+        600
+      ],
+      "notes": "200 이면 통과, 503 이면 아래로 내려가 20초 뒤 다시 시도."
+    },
+    {
+      "parameters": {
+        "jsCode": "// 깨우기를 몇 번이나 시도했는지 센다. $runIndex 는 이 노드의 실행 횟수(0부터).\n// 20초 간격 20회 = 약 6분 30초. 그래도 안 깨면 서버 자체에 문제가 있는 것이므로 멈춘다.\nconst tries = $runIndex + 1;\nif (tries >= 20) {\n  throw new Error(`Render 서버가 6분 넘게 깨어나지 않았습니다(${tries}회 시도). ` +\n                  `Render 대시보드의 Logs 탭에서 배포 오류를 확인하세요.`);\n}\nconsole.log(`서버 깨우는 중... ${tries}회째 (503 = 아직 기동 중, 정상)`);\nreturn $input.all();"
+      },
+      "id": "guard2",
+      "name": "Wake Retry Guard 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "id": "wait2",
+      "name": "Wait 20s 2",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -760,
+        760
+      ],
+      "webhookId": "a7f3c9d1-4b62-4e08-9c12-5d2e8f6a3b90"
     }
   ],
   "connections": {
@@ -608,17 +672,6 @@
         ]
       ]
     },
-    "Wake Render (Free) 2": {
-      "main": [
-        [
-          {
-            "node": "Sheets: read scored history",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Sheets: read scored history": {
       "main": [
         [
@@ -679,6 +732,57 @@
         [
           {
             "node": "Sheets: lookback (append)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wake Render (Free) 2": {
+      "main": [
+        [
+          {
+            "node": "Awake? 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Awake? 2": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read scored history",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wake Retry Guard 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wake Retry Guard 2": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20s 2": {
+      "main": [
+        [
+          {
+            "node": "Wake Render (Free) 2",
             "type": "main",
             "index": 0
           }
