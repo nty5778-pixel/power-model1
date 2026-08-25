@@ -165,8 +165,8 @@ n8n 기본 재시도는 최대 5회·간격 5초(=25초)라 콜드스타트에 �
 
 ## 4. n8n (Cloud 기준)
 
-**Variables 는 쓰지 않는다.** 값은 워크플로 파일에 직접 들어 있고, API 키만 Credential 로 뺐다
-(여러 노드가 공유하고 평문 노출도 피하기 위해서다).
+**Variables 도 Credential 도 쓰지 않는다**(Google Sheets 제외). 값은 전부 워크플로 파일에 있고,
+import 전에 찾아 바꾸기 한 번으로 끝난다. 이유는 §4-1-1.
 
 ### 4-1. 파일에 이미 들어 있는 값
 
@@ -183,32 +183,29 @@ n8n 기본 재시도는 최대 5회·간격 5초(=25초)라 콜드스타트에 �
 바꿔야 할 때는 두 JSON 파일에서 해당 문자열을 찾아 바꾸면 된다
 (주소 4곳, 시트ID 6곳, 아이디 2곳).
 
-### 4-1-1. n8n 에서 직접 입력할 비밀값 4가지
+### 4-1-1. import 전에 비밀값 4개를 찾아 바꾼다
 
-파일에 넣지 않았다. **n8n 화면에서 넣는다.**
+**Credential 로 빼지 않았다.** n8n 은 import 할 때 Credential 을 *이름*으로 찾는데,
+그 시점에 같은 이름이 없으면 연결이 조용히 비고 **헤더 없이 요청이 나간다.**
+그러면 ERCOT 은 `Access denied due to missing subscription key`, Render 는 `401` 을 준다.
+키가 틀린 게 아니라 아예 안 보낸 것이라 원인을 찾기 어렵다. 그래서 노드에 직접 넣는다.
 
-| 값 | 어디에 넣나 |
-|---|---|
-| **ERCOT 비밀번호** | 두 워크플로의 **`ERCOT Token`** 노드 → Body Parameters → `password` (지금 `CHANGE-ME-ERCOT-PW`) |
-| **ERCOT 구독키** | Credential `ERCOT Subscription Key` (아래 4-2) |
-| **Render API 키** | Credential `Render Model API` (아래 4-2) |
-| **Claude API 키** | Credential `Anthropic API` (아래 4-2) |
+두 JSON 파일을 텍스트 편집기로 열고 아래를 **찾아 바꾸기** 한 뒤 import.
 
-⚠️ **ERCOT 비밀번호만은 Credential 로 뺄 수 없다.** ERCOT 공개 API 는 토큰을 아이디·비밀번호로
-받는 방식(ROPC)이라 요청 **본문**에 들어가야 하는데, n8n Credential 은 헤더만 다룬다.
-입력하고 나면 워크플로 안에 저장되므로 **워크플로를 외부로 내보내거나 공유하지 말 것.**
+| 찾을 문자열 | 바꿀 값 | 곳 |
+|---|---|---|
+| `CHANGE-ME-ERCOT-PW` | ERCOT 계정 비밀번호 | 2 |
+| `CHANGE-ME-ERCOT-KEY` | ERCOT 구독키 (Subscription Key) | 5 |
+| `CHANGE-ME-RENDER-API-KEY` | Render 의 `API_KEY` 와 **같은 값** | 2 |
+| `CHANGE-ME-CLAUDE-API-KEY` | Claude API 키 | 2 |
 
-### 4-2. Credentials — API 키 3개
+⚠️ **바꾸고 나면 워크플로 파일에 비밀값이 그대로 담긴다.** 외부로 내보내거나 공유하지 말 것.
+(ERCOT 은 토큰을 아이디·비밀번호로 받는 방식이라 어차피 본문에 들어가야 했다.)
 
-**Credentials → Add credential.** 워크플로에 이미 이 이름으로 연결돼 있으니
-**이름을 정확히 같게** 만들면 자동으로 붙는다.
+### 4-2. Credential 은 Google Sheets 하나뿐
 
-| Credential 이름 | 종류 | 설정 | 쓰는 곳 |
-|---|---|---|---|
-| `Render Model API` | Header Auth | Name `x-api-key` · Value = Render 의 `API_KEY` **와 같은 값** | `/predict`, `/score` |
-| `Anthropic API` | Header Auth | Name `x-api-key` · Value = Claude API 키 | Claude 호출 2곳 |
-| `ERCOT Subscription Key` | Header Auth | Name `Ocp-Apim-Subscription-Key` · Value = §5 구독키 | ERCOT 데이터 5곳 |
-| (이름 자유) | Google Sheets OAuth2 또는 서비스 계정 | | 시트 노드 6곳 |
+**Credentials → Add credential → Google Sheets OAuth2**(또는 서비스 계정).
+import 후 **시트 노드 6곳**에서 드롭다운으로 골라준다.
 
 서비스 계정으로 하면 §1 스프레드시트를 그 계정 이메일에 **편집 권한**으로 공유해야 한다.
 
@@ -316,7 +313,6 @@ ERCOT 응답은 `{ fields:[{name}], data:[[...]] }` 형태이고, 컬럼 이름�
 | `... 컬럼을 못 찾았습니다` | ERCOT 컬럼 이름이 바뀌었다. 오류에 실제 컬럼이 찍힌다 → §5-3 |
 | `ERCOT 응답이 비었습니다` | 구독키 또는 토큰 문제. `ERCOT Token` 노드 실행 결과부터 확인 |
 | 토큰 노드 `401`/`400` | ERCOT 아이디·비밀번호 오타 (§4-1 의 `CHANGE-ME-ERCOT-*`) |
-| ERCOT 데이터 노드 `401` | Credential `ERCOT Subscription Key` 의 값 또는 헤더명 확인 |
 | `Open-Meteo 기온 파싱 실패` | Open-Meteo 응답 구조 변경 |
 | `날씨 결측 N일` | 서버가 예보일의 기온을 못 받았다 → payload 의 `weather` 확인 |
 | `/predict` 401 | Credential `Render Model API` 의 값 ≠ Render `API_KEY` |
