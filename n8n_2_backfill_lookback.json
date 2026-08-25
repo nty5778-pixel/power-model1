@@ -170,11 +170,13 @@
             {
               "name": "Authorization",
               "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
             }
           ]
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 60000
         }
@@ -190,12 +192,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "ERCOT Subscription Key"
-        }
-      },
-      "notes": "DAM Settlement Point Prices. LZ_HOUSTON 시간별 -> 일평균."
+      "notes": "DAM Settlement Point Prices. LZ_HOUSTON 시간별 -> 일평균. 구독키는 이 노드의 Header Parameters 에 직접 넣는다(Credential 로 빼면 import 시 이름 매칭이 어긋나 헤더가 통째로 빠진다)."
     },
     {
       "parameters": {
@@ -227,11 +224,13 @@
             {
               "name": "Authorization",
               "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
             }
           ]
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 60000
         }
@@ -247,12 +246,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "ERCOT Subscription Key"
-        }
-      },
-      "notes": "Settlement Point Prices (15분). LZ_HOUSTON -> 일평균. 확정 정산치여야 한다."
+      "notes": "Settlement Point Prices (15분). LZ_HOUSTON -> 일평균. 확정 정산치여야 한다. 구독키는 이 노드의 Header Parameters 에 직접 넣는다(Credential 로 빼면 import 시 이름 매칭이 어긋나 헤더가 통째로 빠진다)."
     },
     {
       "parameters": {
@@ -367,8 +361,15 @@
         "options": {
           "timeout": 300000
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth"
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "CHANGE-ME-RENDER-API-KEY"
+            }
+          ]
+        }
       },
       "id": "score",
       "name": "Render /score",
@@ -381,11 +382,6 @@
       "retryOnFail": true,
       "maxTries": 4,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "Render Model API"
-        }
-      },
       "notes": "인증은 Credential 'Render Model API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것."
     },
     {
@@ -409,6 +405,10 @@
         "headerParameters": {
           "parameters": [
             {
+              "name": "x-api-key",
+              "value": "CHANGE-ME-CLAUDE-API-KEY"
+            },
+            {
               "name": "anthropic-version",
               "value": "2023-06-01"
             },
@@ -423,9 +423,7 @@
         "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-5',\n  max_tokens: 1200,\n  system: 'ERCOT DA/RT 배분 모델의 주간 성과 리포트를 쓴다. 중요한 전제: 이 모델의 방향 예측력은 AUC 약 0.52 로 사실상 동전던지기이며, 가치는 알파가 아니라 분산 감소와 한쪽 쏠림 방지에 있다. 따라서 (1) 30~60일 표본의 성과 변동은 대부분 노이즈이므로 단기 성과를 근거로 파라미터 변경을 권고하지 말 것. (2) 드리프트 경보가 있으면 사실만 지적하고, 조치는 사람이 판단하도록 남길 것. (3) RT/DA/50-50 세 벤치마크 대비를 모두 언급할 것. (4) 한국어, 8문장 이내.',\n  messages: [{ role: 'user', content: '주간 look-back 지표:\\n' + JSON.stringify($json) }]\n}) }}",
         "options": {
           "timeout": 60000
-        },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth"
+        }
       },
       "id": "claude2",
       "name": "Claude API - Weekly Review",
@@ -438,11 +436,6 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "Anthropic API"
-        }
-      },
       "notes": "인증은 Credential 'Anthropic API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것."
     },
     {

@@ -395,39 +395,36 @@
         <p class="why">n8n이 매일 정해진 시각에 ERCOT 예보와 날씨를 모아 서버에 보내고,
           답을 받아 시트에 적습니다. 다음 날에는 실제 가격을 채워 채점합니다.</p>
 
-        <ol>
-          <li>워크플로 파일 2개를 불러옵니다 —
-            <code class="inline">n8n_1_daily_predict.json</code>,
-            <code class="inline">n8n_2_backfill_lookback.json</code>.</li>
-          <li><b>ERCOT 비밀번호를 넣습니다.</b> 두 워크플로 각각에서
-            <code class="inline">ERCOT Token</code> 노드를 열고, Body Parameters의
-            <code class="inline">password</code> 칸에 있는
-            <code class="inline">CHANGE-ME-ERCOT-PW</code>를 실제 비밀번호로 바꿉니다.
-            <br><span style="color:var(--ink-muted);font-size:.9rem">두 파일 모두 해야 합니다.</span></li>
-          <li>Credential 4개를 만듭니다. <b>이름을 아래와 정확히 같게</b> 만들면 자동으로 연결됩니다.</li>
-        </ol>
+        <div class="note warn">
+          <h3>불러오기 <b>전에</b> 비밀값 4개를 파일에서 바꿔주세요</h3>
+          <p>메모장 같은 편집기로 JSON 파일 2개를 열고 <b>찾아 바꾸기</b>를 하시면 됩니다.
+             n8n 화면에서 노드를 하나씩 열 필요가 없습니다.</p>
+        </div>
 
         <div class="tablewrap">
           <table>
-            <thead><tr><th>Credential 이름</th><th>종류</th><th>넣을 값</th></tr></thead>
+            <thead><tr><th>찾을 글자</th><th>바꿀 값</th><th>곳</th></tr></thead>
             <tbody>
-              <tr><td><code>ERCOT Subscription Key</code></td><td>Header Auth</td>
-                  <td>Name <code>Ocp-Apim-Subscription-Key</code><br>Value = ERCOT 구독키</td></tr>
-              <tr><td><code>Render Model API</code></td><td>Header Auth</td>
-                  <td>Name <code>x-api-key</code><br>Value = 3단계 <code>API_KEY</code>와 <b>똑같은 값</b></td></tr>
-              <tr><td><code>Anthropic API</code></td><td>Header Auth</td>
-                  <td>Name <code>x-api-key</code><br>Value = Claude API 키</td></tr>
-              <tr><td>(이름 자유)</td><td>Google Sheets</td>
-                  <td>OAuth2 또는 서비스 계정 — 시트 노드 6곳에 지정</td></tr>
+              <tr><td><code>CHANGE-ME-ERCOT-PW</code></td><td>ERCOT 계정 비밀번호</td><td>2</td></tr>
+              <tr><td><code>CHANGE-ME-ERCOT-KEY</code></td><td>ERCOT 구독키</td><td>5</td></tr>
+              <tr><td><code>CHANGE-ME-RENDER-API-KEY</code></td><td>3단계 <code>API_KEY</code>와 <b>똑같은 값</b></td><td>2</td></tr>
+              <tr><td><code>CHANGE-ME-CLAUDE-API-KEY</code></td><td>Claude API 키</td><td>2</td></tr>
             </tbody>
           </table>
         </div>
 
+        <ol>
+          <li>바꾼 파일 2개를 불러옵니다 —
+            <code class="inline">n8n_1_daily_predict.json</code>,
+            <code class="inline">n8n_2_backfill_lookback.json</code>.</li>
+          <li>Google Sheets 연결을 하나 만들고, 시트 노드 6곳에서 드롭다운으로 골라줍니다.</li>
+        </ol>
+
         <div class="note warn">
-          <h3>ERCOT 비밀번호는 워크플로 안에 저장됩니다</h3>
-          <p>ERCOT은 아이디·비밀번호로 이용권을 받는 방식이라 요청 내용에 직접 들어가야 하고,
-             n8n의 비밀 보관함(Credential)으로는 뺄 수가 없습니다.
-             <b>워크플로를 외부로 내보내거나 공유하지 마세요.</b></p>
+          <h3>비밀값이 워크플로 안에 저장됩니다</h3>
+          <p>n8n의 비밀 보관함(Credential)을 쓰면 <b>불러올 때 이름이 안 맞으면 조용히 비어버려서</b>,
+             키를 아예 안 보낸 채 요청이 나갑니다. 원인을 찾기 매우 어려운 실패라 노드에 직접 넣는
+             방식으로 통일했습니다. <b>워크플로를 외부로 내보내거나 공유하지 마세요.</b></p>
         </div>
 
         <p style="color:var(--ink-muted);font-size:.9rem">
@@ -538,8 +535,9 @@
               <td>서버가 아예 안 뜨는 상태입니다. Render 화면의 <b>Logs</b> 탭을 열어 오류를 확인하세요.</td></tr>
           <tr><td>토큰 노드 <code>400</code>/<code>401</code></td>
               <td>ERCOT 아이디·비밀번호 오타입니다. <code>ERCOT Token</code> 노드를 확인하세요.</td></tr>
-          <tr><td>ERCOT 데이터 노드 <code>401</code></td>
-              <td>Credential <code>ERCOT Subscription Key</code>의 값 또는 헤더 이름을 확인하세요.</td></tr>
+          <tr><td><code>missing subscription key</code></td>
+              <td>ERCOT 구독키를 안 보냈습니다. <code>CHANGE-ME-ERCOT-KEY</code>를 안 바꿨거나,
+                  예전 버전(Credential 방식) 파일을 쓰고 계신 것입니다.</td></tr>
           <tr><td><code>… 컬럼을 못 찾았습니다</code></td>
               <td>ERCOT이 컬럼 이름을 바꿨습니다. <b>오류 메시지에 실제 이름이 그대로 찍힙니다</b> —
                   그 이름을 <code>Shape Forecast Payload</code> 노드의 후보 목록에 한 줄 추가하면 됩니다.
@@ -550,7 +548,7 @@
               <td>서버가 기온을 못 받았습니다. 일부러 멈춘 것입니다 —
                   날씨 없이 계산하면 판단 정확도가 크게 떨어집니다.</td></tr>
           <tr><td><code>/predict</code> <code>401</code></td>
-              <td>Render의 <code>API_KEY</code>와 Credential <code>Render Model API</code> 값이 다릅니다.</td></tr>
+              <td>Render의 <code>API_KEY</code>와 <code>CHANGE-ME-RENDER-API-KEY</code>에 넣은 값이 다릅니다.</td></tr>
           <tr><td><code>no ERCOT history CSV</code></td>
               <td>학습 데이터가 서버에 안 올라갔습니다. GitHub에 <code>data</code> 폴더가 있는지 확인하세요.</td></tr>
           <tr><td>첫 요청만 느림</td>

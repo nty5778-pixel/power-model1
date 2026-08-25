@@ -197,11 +197,13 @@
             {
               "name": "Authorization",
               "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
             }
           ]
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 60000
         }
@@ -217,12 +219,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "ERCOT Subscription Key"
-        }
-      },
-      "notes": "Seven-Day Load Forecast. 시스템 전체 부하 예보(MW)."
+      "notes": "Seven-Day Load Forecast. 시스템 전체 부하 예보(MW). 구독키는 이 노드의 Header Parameters 에 직접 넣는다(Credential 로 빼면 import 시 이름 매칭이 어긋나 헤더가 통째로 빠진다)."
     },
     {
       "parameters": {
@@ -250,11 +247,13 @@
             {
               "name": "Authorization",
               "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
             }
           ]
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 60000
         }
@@ -270,12 +269,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "ERCOT Subscription Key"
-        }
-      },
-      "notes": "Hourly Wind Power Production - Actual vs Forecast."
+      "notes": "Hourly Wind Power Production - Actual vs Forecast. 구독키는 이 노드의 Header Parameters 에 직접 넣는다(Credential 로 빼면 import 시 이름 매칭이 어긋나 헤더가 통째로 빠진다)."
     },
     {
       "parameters": {
@@ -303,11 +297,13 @@
             {
               "name": "Authorization",
               "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
             }
           ]
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 60000
         }
@@ -323,12 +319,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "ERCOT Subscription Key"
-        }
-      },
-      "notes": "Hourly Solar Power Production - Actual vs Forecast."
+      "notes": "Hourly Solar Power Production - Actual vs Forecast. 구독키는 이 노드의 Header Parameters 에 직접 넣는다(Credential 로 빼면 import 시 이름 매칭이 어긋나 헤더가 통째로 빠진다)."
     },
     {
       "parameters": {
@@ -402,8 +393,15 @@
         "options": {
           "timeout": 300000
         },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth"
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "CHANGE-ME-RENDER-API-KEY"
+            }
+          ]
+        }
       },
       "id": "render",
       "name": "Render /predict",
@@ -416,12 +414,7 @@
       "notes": "타임아웃 300초. Free 티어는 CPU 0.1 이라 학습이 로컬(1초)보다 훨씬 느리다. 앞 단계에서 서버를 깨워뒀으므로 콜드스타트는 이미 끝난 상태다. 인증은 Credential 'Render Model API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것.",
       "retryOnFail": true,
       "maxTries": 4,
-      "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "Render Model API"
-        }
-      }
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -485,6 +478,10 @@
         "headerParameters": {
           "parameters": [
             {
+              "name": "x-api-key",
+              "value": "CHANGE-ME-CLAUDE-API-KEY"
+            },
+            {
               "name": "anthropic-version",
               "value": "2023-06-01"
             },
@@ -499,9 +496,7 @@
         "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-5',\n  max_tokens: 900,\n  system: 'ERCOT LZ_HOUSTON 조달 배분 모델의 일일 결과를 해설한다. 규칙: (1) 주어진 수치만 사용하고 없는 값을 지어내지 않는다. (2) 이 모델의 방향 예측력은 AUC 약 0.52 로 낮다 — 확신에 찬 시장 전망을 쓰지 말 것. (3) 배분이 왜 그렇게 나왔는지(어느 모델이 주도했는지)와 주의할 점을 쓴다. (4) 한국어, 5문장 이내, 불릿 금지. (5) 매수 지시가 아니라 참고 해설임을 전제로 쓴다. (6) 배분 규칙(alloc_mode)이 m1_only 면 평소 RT 를 사고 모델1 점수가 문턱을 넘는 날만 전량 DA 로 가는 규칙이다 — DA_pct 가 0 또는 1 로만 나오는 것이 정상이며 오류가 아니다. ensemble 이면 세 모델 평균이라 중간값이 나온다.',\n  messages: [{ role: 'user', content: '오늘 배분 결과:\\n' + $json.payload }]\n}) }}",
         "options": {
           "timeout": 60000
-        },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth"
+        }
       },
       "id": "claude",
       "name": "Claude API - Daily Commentary",
@@ -514,11 +509,6 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "Anthropic API"
-        }
-      },
       "notes": "인증은 Credential 'Anthropic API'(Header Auth, 헤더명 x-api-key)에서 온다. 키를 워크플로나 Variables 에 적지 말 것."
     },
     {
