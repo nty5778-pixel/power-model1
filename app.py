@@ -149,6 +149,11 @@ def predict(req: PredictRequest, x_api_key: Optional[str] = Header(None)):
     rows = M.forecast_rows(fc, models, reg, req.volume_mw, use_gate=req.use_gate,
                            alloc=alloc, threshold=threshold)
     d0 = pd.Timestamp(d0_ts).date().isoformat()
+    # 학습 데이터가 얼마나 낡았는지. 이 값이 크면 모델이 '최근 상황'이라고 믿는 게
+    # 사실은 몇 주 전 값이다(regime 피처: 최근 DA/basis/예비력/순부하오차).
+    # 예보일과의 간격을 그대로 노출해 조용히 낡아가는 것을 막는다.
+    d0_gap = int((pd.to_datetime(fc["date"]).min().normalize()
+                  - pd.Timestamp(d0_ts).normalize()).days)
     return {
         "run_id": req.run_id or dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
         "generated_at": dt.datetime.utcnow().isoformat(),
@@ -156,6 +161,8 @@ def predict(req: PredictRequest, x_api_key: Optional[str] = Header(None)):
         "alloc_mode": alloc,                    # 어떤 규칙으로 낸 배분인지 기록 (시트에 남길 것)
         "m1_threshold": threshold,
         "d0_last_actual": d0,
+        "d0_gap_days": d0_gap,        # 2~3 이 정상. 수십 일이면 data/ 갱신이 밀린 것
+
         "regime": {"prc_low_r7": reg["prc_low_r7"], "da_med": reg["da_med"]},
         "weather_missing_days": n_missing_wx,   # >0 이면 그 날은 날씨 피처·오버레이 없이 산출됨
         "rows": rows,

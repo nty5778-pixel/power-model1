@@ -340,7 +340,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 채점 완료된 D+1 행만 → /score 페이로드\nconst rows = $input.all().map(i => i.json)\n  .filter(r => r.horizon === 'D+1' && r.DA_actual !== '' && r.DA_actual != null);\nif (rows.length < 20) {\n  return [{ json: { insufficient: true, n: rows.length } }];\n}\nreturn [{ json: { insufficient: false, payload: rows.map(r => ({\n  date: r.target_date,\n  DA_fraction: Number(r.DA_fraction),\n  DA_actual: Number(r.DA_actual),\n  RT_actual: Number(r.RT_actual)\n})) } }];"
+        "jsCode": "// 채점 완료된 D+1 행만 → /score 페이로드\n// 같은 target_date 가 여러 번 들어올 수 있다(재실행/수동테스트). 그대로 보내면\n// 한 날짜가 두 번 집계돼 지표가 왜곡된다. 실측: 08-26 이 두 줄이라\n// 적중률 80% -> 67%, 실현원가 $50.88 -> $60.79 로 어긋났다.\n// 가장 이른 run_id 하나만 남긴다(그날 실제로 손에 쥐었던 예측).\nconst all = $input.all().map(i => i.json)\n  .filter(r => r.horizon === 'D+1' && r.DA_actual !== '' && r.DA_actual != null);\n\nconst byDate = new Map();\nfor (const r of all.sort((a, b) => String(a.run_id).localeCompare(String(b.run_id)))) {\n  const k = String(r.target_date).slice(0, 10);\n  if (!byDate.has(k)) byDate.set(k, r);\n}\nconst rows = [...byDate.values()];\nconst dropped = all.length - rows.length;\nif (dropped) console.log(`중복 날짜 ${dropped}건 제외 (${all.length} -> ${rows.length}일)`);\n\nif (rows.length < 20) {\n  return [{ json: { insufficient: true, n: rows.length } }];\n}\nreturn [{ json: { insufficient: false, payload: rows.map(r => ({\n  date: r.target_date,\n  DA_fraction: Number(r.DA_fraction),\n  DA_actual: Number(r.DA_actual),\n  RT_actual: Number(r.RT_actual)\n})) } }];"
       },
       "id": "prep",
       "name": "Prepare Score Payload",
@@ -349,7 +349,8 @@
       "position": [
         -400,
         600
-      ]
+      ],
+      "notes": "같은 날짜가 두 번 채점되지 않도록 target_date 기준으로 중복을 걸러낸다."
     },
     {
       "parameters": {
