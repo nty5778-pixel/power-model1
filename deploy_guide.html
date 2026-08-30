@@ -510,7 +510,9 @@
 
         <ol start="4">
           <li>다음 날 두 번째 워크플로를 수동 실행해 <code class="inline">DA_actual</code>이 채워지는지 봅니다.</li>
-          <li>기록이 20일 넘게 쌓이면 주간 성적이 <code class="inline">lookback</code> 시트에 자동으로 남습니다.</li>
+          <li>기록이 20일 넘게 쌓이면 주간 성적이 <code class="inline">lookback</code> 시트에 자동으로 남습니다.
+            <br><span style="color:var(--ink-muted);font-size:.9rem">그전까지 주간 작업은
+            <b>“건너뜀”으로 끝나는 게 정상</b>입니다. 매일 실적이 하나씩 쌓여 20일이 되면 저절로 시작됩니다.</span></li>
         </ol>
 
         <div class="success"><span class="tick">✓</span>
@@ -535,6 +537,9 @@
               <td>서버가 아예 안 뜨는 상태입니다. Render 화면의 <b>Logs</b> 탭을 열어 오류를 확인하세요.</td></tr>
           <tr><td>토큰 노드 <code>400</code>/<code>401</code></td>
               <td>ERCOT 아이디·비밀번호 오타입니다. <code>ERCOT Token</code> 노드를 확인하세요.</td></tr>
+          <tr><td><code>JSON parameter needs to be valid JSON</code><br>(주간 리뷰)</td>
+              <td>채점된 날이 아직 20일이 안 돼서 보낼 내용이 비었던 것입니다.
+                  최신 파일에는 <b>건너뛰는 단계</b>가 들어 있으니, 이 오류가 나면 예전 파일입니다.</td></tr>
           <tr><td><code>missing subscription key</code></td>
               <td>ERCOT 구독키를 안 보냈습니다. <code>CHANGE-ME-ERCOT-KEY</code>를 안 바꿨거나,
                   예전 버전(Credential 방식) 파일을 쓰고 계신 것입니다.</td></tr>
