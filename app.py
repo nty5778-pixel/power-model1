@@ -26,6 +26,10 @@ API_KEY = os.environ.get("API_KEY")  # n8n 과 공유하는 단순 인증키
 
 sys.path.insert(0, MODEL_DIR)
 import run_models_d1_d4_v4_weather as M  # noqa: E402
+import sheets_source  # noqa: E402
+
+# 시트에서 학습 데이터를 받아 임시 CSV 로 떨어뜨릴 위치. Render 는 /tmp 쓰기 가능.
+SHEET_CACHE_DIR = os.environ.get("SHEET_CACHE_DIR", "/tmp/sheet_cache")
 
 # 배분 규칙 기본값 — Render 대시보드에서 ALLOC_MODE 로 덮어쓸 수 있다.
 # 기본 m1_only = 평소 RT, 모델1 점수가 문턱을 넘는 날만 DA. 근거는 M.combine_votes() 주석.
@@ -83,16 +87,35 @@ def _build_panel():
     # 'DA LMP 보유' 가 아니라 '필요 컬럼 전부 보유' 로 판별 — Congesiton_*.csv 오인식 방지
     # (오인식되면 concat 시 정상 행을 덮어써서 fc_load/ENV Net Load/PRC 가 조용히 NaN 이 된다)
     ercot_files = [f for f in csvs if M.is_ercot_history(f)[0]]
-    if not ercot_files:
-        raise HTTPException(500, "no ERCOT history CSV (필요 컬럼 전부 보유) found")
     gas = M.pick_csv(csvs, ["katy", "gas", "gd_"], exclude=set(ercot_files))
-    wx = M.load_weather([c for c in csvs if c not in ercot_files])
+    wx_files = [c for c in csvs if c not in ercot_files]
+
+    # 구글 시트에서 최신분을 받아 뒤에 덧붙인다. 시트는 2026-01-01 부터라
+    # 2024~2025 는 계속 CSV 가 담당하고, 겹치는 구간은 뒤에 오는 시트가 이긴다
+    # (load_history / _weather_frame 이 drop_duplicates(keep="last") 를 쓴다).
+    # 시트를 못 읽어도 CSV 만으로 계속 돌아야 하므로 실패는 로그만 남기고 넘어간다.
+    s_ercot, s_gas, s_wx = sheets_source.materialize(SHEET_CACHE_DIR)
+    if s_ercot:
+        ok, miss = M.is_ercot_history(s_ercot)
+        if ok:
+            ercot_files.append(s_ercot)
+        else:
+            print(f"[sheets] 시트 ERCOT 데이터에 필요 컬럼 없음 {miss} — 무시하고 CSV 만 사용",
+                  file=sys.stderr, flush=True)
+    if s_gas:
+        gas = s_gas
+    if s_wx:
+        wx_files.append(s_wx)
+
+    if not ercot_files:
+        raise HTTPException(500, "no ERCOT history (CSV/시트 어디에도 필요 컬럼이 없다)")
+    wx = M.load_weather(wx_files)
 
     mn, gas_df = M.load_history(ercot_files, gas)
     panel = M.daily_panel(mn, gas_df, wx)
     models = M.train_models(panel)
     models["_wx"] = wx
-    models["_wxnorm"] = M.weather_normals([c for c in csvs if c not in ercot_files])
+    models["_wxnorm"] = M.weather_normals(wx_files)
     _cache.update(key=today, models=models, panel=panel)
     return panel, models
 

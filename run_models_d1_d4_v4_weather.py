@@ -1,4 +1,4 @@
-﻿"""
+"""
 run_models_d1_d4.py  —  ERCOT DA/RT 구매비중 산출기 (모델 1~4 통합)
 ===================================================================
 같은 폴더의 CSV로 모델 1~4를 학습하고, 다가오는 D+1~D+4 각 날에 대해
@@ -267,8 +267,17 @@ def load_history(ercot_files, gas, netload="env", verbose=True):
     raw = pd.concat(parts, ignore_index=True)
     raw["ts"] = pd.to_datetime(raw["Timestamp"].str.replace(r"[+-]\d{2}:\d{2}$", "", regex=True),
                                errors="coerce")
-    raw = (raw.dropna(subset=["ts"]).drop_duplicates(subset=["ts"], keep="last")
-              .sort_values("ts").reset_index(drop=True))
+    # 정렬은 반드시 안정 정렬(mergesort). 서머타임 종료일(예: 2025-11-02)은 01시가 두 번
+    # 있어 tz 오프셋을 뗀 뒤 타임스탬프가 중복되는데, 불안정 정렬이면 둘 중 어느 값이
+    # 남을지 실행마다 달라진다(실측: 그날 DA 일평균이 $31.78 <-> $31.84 로 흔들렸다).
+    raw = raw.dropna(subset=["ts"]).sort_values("ts", kind="mergesort")
+    if raw["ts"].duplicated().any():
+        # 같은 시각이 여러 소스(CSV + 구글시트)에서 오면 컬럼별로 '마지막 유효값' 을 취한다.
+        # drop_duplicates(keep="last") 는 행 단위라, 뒤 소스의 한 칸이 비어 있으면
+        # 앞 소스의 멀쩡한 값까지 통째로 사라진다. 실측으로 RT 가격 7시간이 그렇게
+        # 날아가 일평균이 $9.95 -> $14.65 로 어긋난 적이 있다.
+        raw = raw.groupby("ts", as_index=False, sort=True).last()
+    raw = raw.reset_index(drop=True)
     pick = {k: _col(raw.columns, *nd) for k, nd in NEEDLES.items()}
     missing = [k for k in required_keys(netload) if pick[k] is None]
     if missing:
