@@ -19,12 +19,12 @@ n8n 화면에서 손으로 넣은 것들(ERCOT 비밀번호, API 키 3개, Googl
 준비 (한 번만)
 -------------
 1. n8n 화면 → Settings → n8n API → Create an API key
-   (유료 플랜에서만 보이는 메뉴다. 무료 체험 중이면 없다.)
+   (자가 호스팅은 공개 API 가 기본으로 켜져 있다. 유료 플랜 얘기는 n8n Cloud 쪽 제약.)
 2. 이 폴더에 `n8n_push.local.json` 파일을 만들고 아래 두 줄을 채운다.
    이 파일은 .gitignore 에 들어 있어 깃에 올라가지 않는다.
 
    {
-     "base_url": "https://<내주소>.app.n8n.cloud",
+     "base_url": "https://n8n.srv931005.hstgr.cloud",
      "api_key":  "<위에서 만든 키>"
    }
 """
@@ -61,7 +61,7 @@ def load_conf():
     if not os.path.exists(CONF):
         die("설정 파일이 없다: n8n_push.local.json\n"
             "    아래 내용으로 만들고 두 칸을 채울 것 (파일 맨 위 설명 참고).\n\n"
-            '    {\n      "base_url": "https://<내주소>.app.n8n.cloud",\n'
+            '    {\n      "base_url": "https://n8n.srv931005.hstgr.cloud",\n'
             '      "api_key":  "<n8n Settings → n8n API 에서 만든 키>"\n    }')
     try:
         c = json.loads(io.open(CONF, encoding="utf-8").read().lstrip("﻿"))

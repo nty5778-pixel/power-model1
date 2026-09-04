@@ -336,28 +336,23 @@ ERCOT 비밀번호, API 키 3개, Google Sheets 연결. 레포의 JSON 에는 �
 **준비 (한 번만)**
 
 1. n8n 화면 → **Settings → n8n API → Create an API key**
-   ⚠️ **유료 플랜(Starter $20/월 이상)에서만 보이는 메뉴다.** 무료 체험 중에는 없다 —
-   그때는 기존대로 import 해야 한다.
+
+   이 n8n 은 **Hostinger VPS 에 직접 올린 자가 호스팅**이다. 자가 호스팅은 공개 API 가
+   **기본으로 켜져 있고 무료다** — 요금제와 무관하다.
+   (`N8N_PUBLIC_API_DISABLED=true` 로 꺼둔 경우에만 메뉴가 안 보인다.
+   유료 플랜이 필요하다는 제약은 n8n **Cloud** 쪽 얘기이고 여기엔 해당하지 않는다.)
+
 2. 이 폴더에 `n8n_push.local.json` 을 만든다. (`.gitignore` 에 들어 있어 커밋되지 않는다.)
 
 ```json
 {
-  "base_url": "https://<내주소>.app.n8n.cloud",
+  "base_url": "https://n8n.srv931005.hstgr.cloud",
   "api_key":  "<위에서 만든 키>"
 }
 ```
 
-**`base_url` 찾는 법** — n8n 을 브라우저에서 열고 **주소창을 그대로 복사**하면 된다.
-뒤에 `/home/workflows` 같은 게 붙어 있어도 스크립트가 알아서 잘라낸다.
-
-| 주소창에 이렇게 보이면 | 실제로 쓰는 값 |
-|---|---|
-| `https://내주소.app.n8n.cloud/home/workflows` | `https://내주소.app.n8n.cloud` |
-| `https://내주소.app.n8n.cloud/workflow/AbC123` | 〃 |
-
-⚠️ **`https://app.n8n.cloud/...` 는 아니다.** 앞에 내 이름이 없는 그 주소는 요금·계정
-관리 화면이다. 거기서 내 인스턴스를 열면 주소가 `내주소.app.n8n.cloud` 로 바뀐다.
-스크립트가 이 경우를 알아채고 따로 알려준다.
+`base_url` 은 위 값 그대로다. n8n 화면 주소창에서 **호스트 이름까지**가 전부이고,
+뒤에 `/workflow/wW1pKffENK7y4Akk` 같은 게 붙어 있어도 스크립트가 알아서 잘라낸다.
 
 **맞는지 확인** — `python push_n8n.py --dry-run` 을 돌렸을 때
 `n8n 에 있는 워크플로 N개 확인` 이 나오면 주소와 키가 둘 다 맞은 것이다.
