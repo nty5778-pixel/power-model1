@@ -21,3 +21,6 @@ venv/
 .idea/
 Thumbs.db
 desktop.ini
+
+# n8n 밀어넣기용 접속 정보 (push_n8n.py). 절대 커밋 금지 — API 키가 들어간다.
+n8n_push.local.json

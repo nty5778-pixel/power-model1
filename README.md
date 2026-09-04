@@ -29,6 +29,7 @@ repo/
 ├── run_models_d1_d4_v4_weather.py    모델 본체 (CLI + 라이브러리 겸용)
 ├── backtest_walkforward.py           walk-forward 검증 — 배분 규칙 변경은 전부 여기를 통과한다
 ├── sheets_source.py                  구글 시트 → CSV 모양으로 읽어오기 (웹게시 URL / 서비스계정)
+├── push_n8n.py                       워크플로 JSON → n8n 반영 (비밀값은 n8n 것을 이어받는다)
 ├── requirements.txt
 ├── render.yaml
 ├── DEPLOY.md                         배포 절차 (사람이 직접 해야 하는 것만)
