@@ -25,7 +25,7 @@ n8n 화면에서 손으로 넣은 것들(ERCOT 비밀번호, API 키 3개, Googl
 
    {
      "base_url": "https://n8n.srv931005.hstgr.cloud",
-     "api_key":  "<위에서 만든 키>"
+     "api_key":  "여기에 위에서 만든 키"
    }
 """
 import argparse
@@ -33,6 +33,7 @@ import copy
 import io
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -62,16 +63,23 @@ def load_conf():
         die("설정 파일이 없다: n8n_push.local.json\n"
             "    아래 내용으로 만들고 두 칸을 채울 것 (파일 맨 위 설명 참고).\n\n"
             '    {\n      "base_url": "https://n8n.srv931005.hstgr.cloud",\n'
-            '      "api_key":  "<n8n Settings → n8n API 에서 만든 키>"\n    }')
+            '      "api_key":  "여기에 n8n Settings → n8n API 에서 만든 키"\n    }')
     try:
         c = json.loads(io.open(CONF, encoding="utf-8").read().lstrip("﻿"))
     except json.JSONDecodeError as e:
         die(f"n8n_push.local.json 을 읽을 수 없다 ({e}).\n"
             "    따옴표나 쉼표가 빠졌는지 확인할 것. 형식은 파일 맨 위 설명 참고.")
     for k in ("base_url", "api_key"):
-        if not str(c.get(k, "")).strip() or "<" in str(c[k]):
-            die(f"n8n_push.local.json 의 {k} 가 아직 안 채워져 있다")
-        c[k] = str(c[k]).strip()
+        v = str(c.get(k, "")).strip()
+        # 이 파일의 예시가 <이렇게> 되어 있어서, 꺾쇠까지 같이 붙여넣기 쉽다.
+        # 안을 실제로 채웠으면 꺾쇠만 떼고 받아준다.
+        if len(v) > 2 and v[0] == "<" and v[-1] == ">":
+            v = v[1:-1].strip()
+            print(f"   (설정의 {k} 에서 꺾쇠 < > 를 떼고 씀)")
+        if not v or "<" in v or ">" in v:
+            die(f"n8n_push.local.json 의 {k} 가 아직 안 채워져 있다.\n"
+                "    예시의 <꺾쇠> 는 지우고 그 안에 실제 값만 넣을 것.")
+        c[k] = v
 
     # 키에 한글이나 눈에 안 보이는 문자가 섞이면 HTTP 헤더에 못 넣는다.
     # 그냥 두면 알아볼 수 없는 오류가 쏟아지므로 여기서 먼저 잡는다.
@@ -112,7 +120,33 @@ def normalize_base_url(raw):
     return clean
 
 
-def api(conf, method, path, body=None):
+# 인증서 검증용 컨텍스트. 처음엔 파이썬 기본값(가장 엄격)을 쓰고,
+# 아래 _relax_ssl() 이 딱 한 번 필요한 만큼만 완화한다.
+_SSL_CTX = None
+
+
+def _relax_ssl():
+    """파이썬 3.13+ 의 추가 엄격 검사(VERIFY_X509_STRICT)만 끈다.
+
+    회사 네트워크가 TLS 를 가로채 자체 인증서로 바꿔치기하는 환경에서는,
+    그 인증서에 Authority Key Identifier 확장이 없어 이 검사에 걸린다.
+    (브라우저는 윈도우 인증서 저장소를 쓰고 이 검사를 안 해서 멀쩡히 열린다.)
+
+    끄는 것은 그 형식 검사뿐이다 — **서명 사슬·호스트 이름·유효기간 확인은
+    그대로 살아 있다.** 검증을 통째로 끄는 것(verify_mode=CERT_NONE)과는 다르다.
+    """
+    global _SSL_CTX
+    ctx = ssl.create_default_context()
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    _SSL_CTX = ctx
+
+
+def _open(req):
+    return urllib.request.urlopen(req, timeout=60, context=_SSL_CTX)
+
+
+def api(conf, method, path, body=None, soft=False):
+    """soft=True 면 실패해도 프로그램을 끝내지 않고 None 을 돌려준다."""
     url = f"{conf['base_url']}/api/v1{path}"
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -121,10 +155,26 @@ def api(conf, method, path, body=None):
     if data:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            raw = r.read().decode("utf-8")
+        try:
+            with _open(req) as r:
+                raw = r.read().decode("utf-8")
+        except urllib.error.URLError as e:
+            # 가로채기 인증서 때문이면 한 번만 완화해서 재시도한다
+            if _SSL_CTX is None and isinstance(getattr(e, "reason", None),
+                                               ssl.SSLCertVerificationError) \
+                    and "Authority Key Identifier" in str(e.reason):
+                print("   (이 서버 인증서에 Authority Key Identifier 가 없다 — "
+                      "파이썬 3.13+ 의 추가 엄격 검사만 끄고 다시 시도한다.\n"
+                      "    서명 사슬·호스트 이름·유효기간 확인은 그대로다.)")
+                _relax_ssl()
+                with _open(req) as r:
+                    raw = r.read().decode("utf-8")
+            else:
+                raise
         return json.loads(raw) if raw.strip() else {}
     except urllib.error.HTTPError as e:
+        if soft:
+            return None
         detail = e.read().decode("utf-8", "replace")[:400]
         hint = ""
         if e.code == 401:
@@ -137,6 +187,36 @@ def api(conf, method, path, body=None):
         die(f"n8n 에 접속할 수 없다 ({e.reason}). base_url 을 확인할 것.")
     except Exception as e:                      # 예상 못 한 것도 읽을 수 있게 내보낸다
         die(f"{method} {path} 중 문제가 생겼다 — {type(e).__name__}: {e}")
+
+
+def remember_id(fname, wid):
+    """찾은 워크플로 id 를 설정 파일에 적어 둔다.
+
+    이름으로만 찾으면, 사람이 n8n 화면에서 이름을 바꾸는 순간(실제로 'M1 run' 으로
+    바뀌어 있었다) 못 찾고 **똑같은 워크플로를 하나 더 만들어 버린다.**
+    id 는 이름을 바꿔도 그대로라, 한 번 적어 두면 다시는 헷갈리지 않는다.
+    """
+    c = json.loads(io.open(CONF, encoding="utf-8").read().lstrip("﻿"))
+    c.setdefault("workflows", {})[fname] = wid
+    io.open(CONF, "w", encoding="utf-8", newline="\n").write(
+        json.dumps(c, ensure_ascii=False, indent=2) + "\n")
+    print(f"   (이 워크플로의 id {wid} 를 설정 파일에 적어 뒀다 — 다음부터는 바로 찾는다)")
+
+
+def resolve_remote(conf, fname, local, idx):
+    """이 파일이 n8n 의 어느 워크플로인지 정한다. (워크플로 or None, 설명)"""
+    pinned = (conf.get("workflows") or {}).get(fname)
+    if pinned:
+        w = api(conf, "GET", f"/workflows/{pinned}", soft=True)
+        if w:
+            return w, f"설정에 적어둔 id {pinned}"
+        print(f"   ! 설정의 id {pinned} 를 n8n 에서 못 찾았다 (지워졌나?) — 이름으로 다시 찾는다")
+
+    stub = idx.get(local["name"])
+    if stub:
+        w = api(conf, "GET", f"/workflows/{stub['id']}")
+        return w, f"이름이 같은 것 (id {stub['id']})"
+    return None, None
 
 
 def remote_index(conf):
@@ -182,6 +262,21 @@ def _set(obj, path, val):
     obj[path[-1]] = val
 
 
+# Google Sheets 노드는 화면에서 열어볼 때 시트의 컬럼 목록을 읽어 여기에 캐시해 둔다.
+# 레포 파일에는 그게 없으므로, 그냥 덮어쓰면 캐시가 지워진다(동작은 하지만 화면에서
+# 컬럼 목록이 빈 채로 보인다). 로컬에 없는 항목만 n8n 것을 그대로 살려 둔다.
+UI_CACHE_KEYS = ("schema", "attemptToConvertTypes", "convertFieldsToString", "value")
+
+
+def _keep_ui_cache(local_params, remote_params):
+    lc, rc = local_params.get("columns"), remote_params.get("columns")
+    if not isinstance(lc, dict) or not isinstance(rc, dict):
+        return
+    for k in UI_CACHE_KEYS:
+        if k not in lc and k in rc:
+            lc[k] = copy.deepcopy(rc[k])
+
+
 def carry_over_secrets(local_wf, remote_wf):
     """로컬의 CHANGE-ME 자리에 n8n 의 현재 값을 도로 채운다.
 
@@ -197,6 +292,8 @@ def carry_over_secrets(local_wf, remote_wf):
             node["credentials"] = copy.deepcopy(rn["credentials"])
 
         params = node.get("parameters", {})
+        if rn:
+            _keep_ui_cache(params, rn.get("parameters", {}))
         for path in list(_paths_with_placeholder(params)):
             here = f"{node['name']} → {'.'.join(str(p) for p in path)}"
             cur = _get(rn.get("parameters", {}), path) if rn else None
@@ -260,16 +357,19 @@ def do_push(conf, files, dry, force):
     plans, blocked = [], False
     for fname in files:
         local = read_local(fname)
-        stub = idx.get(local["name"])
         print(f"── {fname}")
-        print(f"   워크플로 이름: {local['name']}")
+        remote_full, how = resolve_remote(conf, fname, local, idx)
 
-        remote_full = api(conf, "GET", f"/workflows/{stub['id']}") if stub else None
-        if stub:
+        if remote_full:
             state = "켜짐" if remote_full.get("active") else "꺼짐"
-            print(f"   n8n 쪽 상태  : 있음 (id {stub['id']}, 자동실행 {state})")
+            print(f"   n8n 쪽 이름  : {remote_full['name']}")
+            print(f"   찾은 방법    : {how}")
+            print(f"   상태         : 자동실행 {state}")
+            if remote_full["name"] != local["name"]:
+                # 화면에서 붙인 이름이 사람의 선택이다. 파일 이름으로 되돌리지 않는다.
+                print(f"   (파일상 이름 '{local['name']}' 과 다르지만 그대로 둔다)")
         else:
-            print("   n8n 쪽 상태  : 없음 → 새로 만든다")
+            print(f"   n8n 쪽 상태  : 없음 → '{local['name']}' 으로 새로 만든다")
 
         filled, missing = carry_over_secrets(local, remote_full or {})
         print(f"   비밀값       : {filled}개 이어받음", end="")
@@ -277,7 +377,7 @@ def do_push(conf, files, dry, force):
             print(f" · {len(missing)}개 못 찾음")
             for m in missing:
                 print(f"                  ! {m}")
-            if not stub:
+            if not remote_full:
                 print("                  (새 워크플로라 당연하다 — 만든 뒤 화면에서 채울 것)")
             elif force:
                 print("                  (--force 라 그대로 올린다)")
@@ -289,7 +389,7 @@ def do_push(conf, files, dry, force):
         for line in summarize(local, remote_full):
             print(f"   {line}")
         print()
-        plans.append((fname, local, stub))
+        plans.append((fname, local, remote_full))
 
     if blocked:
         die("n8n 에서 비밀값을 못 찾은 자리가 있어 **아무것도** 밀어넣지 않았다.\n"
@@ -301,15 +401,21 @@ def do_push(conf, files, dry, force):
         return
 
     # 2단계 — 여기부터 실제 반영
-    for fname, local, stub in plans:
+    for fname, local, remote_full in plans:
         body = {k: local[k] for k in PUT_KEYS}
-        if stub:
-            api(conf, "PUT", f"/workflows/{stub['id']}", body)
-            print(f"   ✓ {fname} 반영 완료 (자동실행 상태는 건드리지 않았다)")
+        if remote_full:
+            body["name"] = remote_full["name"]      # 화면에서 붙인 이름을 지키다
+            wid = remote_full["id"]
+            api(conf, "PUT", f"/workflows/{wid}", body)
+            print(f"   ✓ {fname} → '{body['name']}' 반영 완료 "
+                  f"(이름·자동실행 상태는 건드리지 않았다)")
         else:
             new = api(conf, "POST", "/workflows", body)
-            print(f"   ✓ {fname} 새로 만들었다 (id {new.get('id')}). "
+            wid = new.get("id")
+            print(f"   ✓ {fname} 새로 만들었다 (id {wid}). "
                   f"화면에서 비밀값을 채우고 자동실행을 켤 것")
+        if (conf.get("workflows") or {}).get(fname) != wid:
+            remember_id(fname, wid)
     print()
 
 
@@ -319,14 +425,16 @@ def do_pull(conf, files):
     idx = remote_index(conf)
     for fname in files:
         local = read_local(fname)
-        stub = idx.get(local["name"])
-        if not stub:
-            print(f"── {fname}: n8n 에 '{local['name']}' 이 없다 — 건너뜀")
+        remote, how = resolve_remote(conf, fname, local, idx)
+        if not remote:
+            print(f"── {fname}: n8n 에서 짝을 못 찾았다 — 건너뜀")
             continue
-        remote = api(conf, "GET", f"/workflows/{stub['id']}")
 
-        # 로컬에서 CHANGE-ME 였던 자리는 다시 CHANGE-ME 로 되돌린다
+        # 로컬에서 CHANGE-ME 였던 자리는 다시 CHANGE-ME 로 되돌린다.
+        # 이름은 파일 쪽 것을 유지한다 — 화면 이름('M1 run' 등)은 그 사람의 것이고
+        # 레포 파일은 어떤 워크플로인지 알 수 있는 이름이어야 한다.
         out = {k: copy.deepcopy(remote.get(k)) for k in PUT_KEYS}
+        out["name"] = local["name"]
         onodes = {n["name"]: n for n in out["nodes"]}
         masked = 0
         for node in local["nodes"]:
@@ -342,7 +450,10 @@ def do_pull(conf, files):
         p = os.path.join(HERE, fname)
         io.open(p, "w", encoding="utf-8", newline="\n").write(
             json.dumps(out, ensure_ascii=False, indent=2) + "\n")
-        print(f"── {fname}: 내려받음 (노드 {len(out['nodes'])}개, 비밀값 {masked}자리 가림)")
+        print(f"── {fname}: '{remote['name']}' 에서 내려받음 ({how}) — "
+              f"노드 {len(out['nodes'])}개, 비밀값 {masked}자리 가림")
+        if (conf.get("workflows") or {}).get(fname) != remote["id"]:
+            remember_id(fname, remote["id"])
     print("\n`git diff` 로 뭐가 달라졌는지 확인할 것.")
 
 

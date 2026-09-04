@@ -347,15 +347,36 @@ ERCOT 비밀번호, API 키 3개, Google Sheets 연결. 레포의 JSON 에는 �
 ```json
 {
   "base_url": "https://n8n.srv931005.hstgr.cloud",
-  "api_key":  "<위에서 만든 키>"
+  "api_key":  "여기에 위에서 만든 키"
 }
 ```
+
+⚠️ **`<` `>` 는 지우고** 그 안에 실제 값만 넣는다 (꺾쇠까지 붙여넣는 실수가 잦다 —
+스크립트가 알아서 떼어내긴 하지만, 없는 편이 낫다).
 
 `base_url` 은 위 값 그대로다. n8n 화면 주소창에서 **호스트 이름까지**가 전부이고,
 뒤에 `/workflow/wW1pKffENK7y4Akk` 같은 게 붙어 있어도 스크립트가 알아서 잘라낸다.
 
 **맞는지 확인** — `python push_n8n.py --dry-run` 을 돌렸을 때
 `n8n 에 있는 워크플로 N개 확인` 이 나오면 주소와 키가 둘 다 맞은 것이다.
+
+3. 워크플로 id 는 처음 밀어넣을 때 스크립트가 자동으로 적어 둔다. 이렇게 된다.
+
+```json
+{
+  "base_url": "https://n8n.srv931005.hstgr.cloud",
+  "api_key":  "...",
+  "workflows": {
+    "n8n_1_daily_predict.json":    "wW1pKffENK7y4Akk",
+    "n8n_2_backfill_lookback.json": "cWVEo8dRsfpIEuYV"
+  }
+}
+```
+
+⚠️ **이름이 아니라 id 로 찾는 이유** — 1번 워크플로는 n8n 화면에서 `M1 run` 으로
+이름이 바뀌어 있었다. 이름으로만 찾았다면 "없다" 고 판단해 **똑같은 워크플로를 하나 더
+만들고**, 켜져 있는 진짜 워크플로는 손도 못 댄 채 남았을 것이다. id 는 이름을 바꿔도
+그대로다. 화면에서 붙인 이름은 그대로 두고 내용만 갈아끼운다.
 
 **쓰는 법**
 
