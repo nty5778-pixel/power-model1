@@ -6,13 +6,28 @@
   $84 로 예측했다(과거 8월 실적 평균 $37.5). 시트는 매일 갱신되므로 여기서 읽으면
   이 문제가 구조적으로 사라진다.
 
+읽는 방법 두 가지 — 환경변수로 결정된다
+  1) **웹 게시 CSV** (권장, 구글 클라우드 콘솔 불필요)
+     시트에서 파일 > 공유 > 웹에 게시 > 탭 선택 > CSV. 나오는 주소를 아래 환경변수에 넣는다.
+       SHEET_CSV_HIST    Historical data 탭
+       SHEET_CSV_DEMAND  demand 탭 (부하 예보)
+       SHEET_CSV_GAS     GD Katy 탭 (선택)
+       SHEET_CSV_WX      기온 탭
+       SHEET_CSV_WXNORM  30년 평년값 탭 (선택)
+     탭 단위로만 게시되므로 같은 문서의 다른 탭(예: 유료 리서치)은 계속 비공개다.
+     주소는 추측 불가능한 토큰이고 언제든 게시를 중단할 수 있다.
+     ※ 게시본은 구글이 몇 분 캐시한다. 하루 한 번 도는 작업엔 문제없다.
+  2) **서비스 계정** — GOOGLE_SERVICE_ACCOUNT_JSON 에 키 JSON 을 넣으면 이쪽을 쓴다.
+     시트를 공개하지 않아도 되지만 구글 클라우드 콘솔에서 계정을 만들어야 한다.
+  둘 다 없으면 시트 기능이 꺼지고 `data/` CSV 만 쓴다.
+
 설계
   * 기존 로더를 건드리지 않는다. 시트를 읽어 **CSV 와 똑같은 컬럼명**으로 임시 파일에
     떨어뜨리고, 그 경로를 파일 목록에 끼워 넣기만 한다. NEEDLES 매칭·중복제거·
     winsorize 등 검증된 경로를 그대로 탄다.
   * 시트가 2026-01-01 부터라 2024~2025 는 계속 CSV 가 담당한다. `load_history` 가
-    타임스탬프 기준으로 합치고 `keep='last'` 하므로, 겹치는 구간은 시트가 이긴다.
-  * 시트를 못 읽으면 예외를 삼키고 None 을 돌려준다 — CSV 만으로도 서버는 떠야 한다.
+    타임스탬프로 합치면서 컬럼별 마지막 유효값을 취하므로 겹치는 구간은 시트가 이긴다.
+  * 시트를 못 읽으면 None 을 돌려준다 — CSV 만으로도 서버는 떠야 한다.
     대신 무엇이 실패했는지 로그로 크게 남긴다(조용한 실패 금지).
 
 실측 대조 (2026-01-01~01-07 겹치는 154시간)
@@ -30,9 +45,16 @@ import pandas as pd
 # ---------------------------------------------------------------- 설정
 DB_SHEET_ID = os.environ.get("SHEET_DB_ID", "1g-yuKuUhSd3nU7eDiLWFgxOcbuFkBWmWH0wZvGg6B9I")
 WX_SHEET_ID = os.environ.get("SHEET_WEATHER_ID", "1_K__Dyw5PJwXRweY38rvumWjyLx_2zyJ5kRWFh9pYXs")
-GID_HIST = int(os.environ.get("SHEET_GID_HIST", 2119869267))   # Historical data
-GID_DEMAND = int(os.environ.get("SHEET_GID_DEMAND", 652364015))  # demand (부하·풍력·태양광 예보)
-GID_GAS = int(os.environ.get("SHEET_GID_GAS", 969659245))     # GD Katy
+
+# 서비스 계정 모드에서 쓰는 탭 위치 (문서ID, gid)
+API_TABS = {
+    "hist":   (DB_SHEET_ID, int(os.environ.get("SHEET_GID_HIST", 2119869267))),
+    "demand": (DB_SHEET_ID, int(os.environ.get("SHEET_GID_DEMAND", 652364015))),
+    "gas":    (DB_SHEET_ID, int(os.environ.get("SHEET_GID_GAS", 969659245))),
+}
+# 웹 게시 모드에서 쓰는 환경변수 이름
+URL_ENV = {"hist": "SHEET_CSV_HIST", "demand": "SHEET_CSV_DEMAND", "gas": "SHEET_CSV_GAS",
+           "wx": "SHEET_CSV_WX", "wxnorm": "SHEET_CSV_WXNORM"}
 
 # 시트 컬럼 → CSV 의 긴 컬럼명. NEEDLES 가 부분매칭으로 찾는 이름이라 그대로 맞춘다.
 HIST_MAP = {
@@ -57,9 +79,18 @@ def _log(msg):
     print(f"[sheets] {msg}", file=sys.stderr, flush=True)
 
 
-# ---------------------------------------------------------------- 접속
-def _client():
-    """서비스 계정으로 시트에 붙는다. 키가 없으면 None (= 시트 기능 끔)."""
+# ---------------------------------------------------------------- 읽기 방식
+def _read_url(url):
+    """웹 게시된 탭을 CSV 로 받는다. 인증 없음."""
+    if not url:
+        return None
+    df = pd.read_csv(url, dtype=str, keep_default_na=False)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df.replace("", pd.NA)
+
+
+def _sa_client():
+    """서비스 계정 클라이언트. 키가 없거나 라이브러리가 없으면 None."""
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not raw:
         return None
@@ -67,13 +98,12 @@ def _client():
         import gspread
         from google.oauth2.service_account import Credentials
     except ImportError as e:
-        _log(f"라이브러리 없음({e}) — requirements.txt 에 gspread/google-auth 필요")
+        _log(f"서비스 계정 라이브러리 없음({e}) — requirements.txt 의 gspread/google-auth 확인")
         return None
     try:
         info = json.loads(raw)
     except json.JSONDecodeError:
-        # 파일 경로를 넣은 경우도 받아준다
-        if os.path.exists(raw):
+        if os.path.exists(raw):                       # 파일 경로를 넣은 경우도 받아준다
             info = json.load(io.open(raw, encoding="utf-8"))
         else:
             _log("GOOGLE_SERVICE_ACCOUNT_JSON 이 JSON 도 파일경로도 아니다")
@@ -84,7 +114,7 @@ def _client():
 
 
 def _grid(ws):
-    """워크시트 → DataFrame. 첫 행을 헤더로 쓰고 빈 컬럼은 버린다."""
+    """워크시트 → DataFrame. 첫 행을 헤더로 쓰고 이름 없는 컬럼은 버린다."""
     vals = ws.get_all_values()
     if len(vals) < 2:
         return pd.DataFrame()
@@ -95,6 +125,43 @@ def _grid(ws):
     return df.replace("", pd.NA)
 
 
+def make_reader():
+    """(reader, 모드이름) 반환. reader(key) → DataFrame 또는 None."""
+    urls = {k: os.environ.get(v, "").strip() for k, v in URL_ENV.items()}
+    if any(urls.values()):
+        def r(key):
+            try:
+                return _read_url(urls.get(key))
+            except Exception as e:
+                _log(f"{key} 웹게시 CSV 읽기 실패: {e}")
+                return None
+        have = [k for k, v in urls.items() if v]
+        return r, f"웹 게시 CSV ({', '.join(have)})"
+
+    gc = _sa_client()
+    if gc is None:
+        return None, None
+
+    wx_cache = {}
+
+    def r(key):
+        try:
+            if key in API_TABS:
+                sid, gid = API_TABS[key]
+                return _grid(gc.open_by_key(sid).get_worksheet_by_id(gid))
+            # 날씨 시트는 gid 를 모르므로 컬럼으로 탭을 찾는다
+            if not wx_cache:
+                sh = gc.open_by_key(WX_SHEET_ID)
+                wx_cache.update({ws.title: _grid(ws) for ws in sh.worksheets()})
+            need = "temp_mean_f" if key == "wx" else "normal_temp_mean_f"
+            return next((d for d in wx_cache.values()
+                         if not d.empty and need in d.columns), None)
+        except Exception as e:
+            _log(f"{key} 시트 읽기 실패: {e}")
+            return None
+    return r, "서비스 계정"
+
+
 def _ts(s):
     """타임스탬프 정규화. CSV 와 같은 규칙으로 tz 오프셋을 떼고 wall-clock 으로 읽는다
     (DST 때문에 파일마다 -06:00/-05:00 이 섞여 있어 UTC 변환하면 시간대별 분석이 어긋난다)."""
@@ -103,57 +170,50 @@ def _ts(s):
 
 
 # ---------------------------------------------------------------- ERCOT
-def fetch_ercot(gc):
+def fetch_ercot(read):
     """Historical data 탭(실적 10종) + demand 탭(부하 예보) → CSV 모양 DataFrame."""
-    sh = gc.open_by_key(DB_SHEET_ID)
-    hist = _grid(sh.get_worksheet_by_id(GID_HIST))
-    if hist.empty or "Timestamp" not in hist.columns:
-        _log("Historical data 탭이 비었거나 Timestamp 컬럼이 없다")
+    hist = read("hist")
+    if hist is None or hist.empty or "Timestamp" not in hist.columns:
+        _log("Historical data 를 못 읽었거나 Timestamp 컬럼이 없다")
         return None
 
     out = pd.DataFrame({"Timestamp": hist["Timestamp"]})
     out["_ts"] = _ts(hist["Timestamp"])
-    missing = []
+    missing = [s for s in HIST_MAP if s not in hist.columns]
     for src, dst in HIST_MAP.items():
         if src in hist.columns:
             out[dst] = pd.to_numeric(hist[src], errors="coerce")
-        else:
-            missing.append(src)
     if missing:
         _log(f"Historical 탭에 없는 컬럼: {missing}")
 
-    # 부하 예보: demand 탭. 시각으로 붙인다.
-    dem = _grid(sh.get_worksheet_by_id(GID_DEMAND))
-    dcol = next((c for c in ("DateTime", "Timestamp", "Date") if c in dem.columns), None)
-    vcol = next((c for c in ("Demand", "Load", "Load_f") if c in dem.columns), None)
-    if dem.empty or not dcol or not vcol:
-        _log(f"demand 탭에서 시각/부하 컬럼을 못 찾음 (있는 컬럼: {list(dem.columns)[:8]})")
+    dem = read("demand")
+    dcol = vcol = None
+    if dem is not None and not dem.empty:
+        dcol = next((c for c in ("DateTime", "Timestamp", "Date") if c in dem.columns), None)
+        vcol = next((c for c in ("Demand", "Load", "Load_f") if c in dem.columns), None)
+    if not dcol or not vcol:
+        cols = list(dem.columns)[:8] if dem is not None else "(못 읽음)"
+        _log(f"demand 탭에서 시각/부하 컬럼을 못 찾음 (있는 컬럼: {cols})")
     else:
         d = pd.DataFrame({"_ts": _ts(dem[dcol]),
                           FC_LOAD_COL: pd.to_numeric(dem[vcol], errors="coerce")})
         d = d.dropna(subset=["_ts"]).drop_duplicates("_ts", keep="last")
         out = out.merge(d, on="_ts", how="left")
-        n = out[FC_LOAD_COL].notna().sum()
-        _log(f"부하 예보 {n:,}/{len(out):,} 시간 결합 ({vcol} @ demand 탭)")
+        _log(f"부하 예보 {out[FC_LOAD_COL].notna().sum():,}/{len(out):,} 시간 결합"
+             f" ({vcol} @ demand 탭)")
 
     out = out.dropna(subset=["_ts"]).sort_values("_ts").drop(columns=["_ts"])
     return out
 
 
 # ---------------------------------------------------------------- 가스
-def fetch_gas(gc):
-    """GD Katy 탭 → (date, gas) 2열. 못 읽으면 None — 가스는 M2 만 쓰고
-    현재 배분 규칙(m1_only)에는 관여하지 않으므로 없어도 서버는 돈다."""
-    try:
-        ws = gc.open_by_key(DB_SHEET_ID).get_worksheet_by_id(GID_GAS)
-        df = _grid(ws)
-    except Exception as e:
-        _log(f"GD Katy 탭 읽기 실패: {e}")
-        return None
-    if df.empty:
+def fetch_gas(read):
+    """GD Katy 탭 → (date, gas). 없어도 된다 — 가스는 M2 만 쓰고 현재 배분 규칙
+    (m1_only)에는 관여하지 않으므로 서버는 그대로 돈다."""
+    df = read("gas")
+    if df is None or df.empty:
         return None
     dcol = next((c for c in df.columns if "date" in c.lower()), None)
-    # KATY 가 붙은 가격 컬럼 우선, 없으면 Close
     vcol = (next((c for c in df.columns if "katy" in c.lower()), None)
             or next((c for c in df.columns if c.lower() in ("close", "price")), None))
     if not dcol or not vcol:
@@ -167,38 +227,29 @@ def fetch_gas(gc):
 
 
 # ---------------------------------------------------------------- 날씨
-def fetch_weather(gc):
-    """기온 탭 + 30년 평년값 탭 → date/temp/normal 컬럼.
+def fetch_weather(read):
+    """기온 탭 + 30년 평년값 탭 → date/temp/normal.
 
-    평년값이 붙으면 모델이 자체 산출(2.5년치) 대신 이걸 쓴다. 시트 실측에서
+    평년값이 붙으면 모델이 자체 산출(2.5년치) 대신 그것을 쓴다. 시트 실측에서
     8월 기온편차가 +2.7~+8.8F 로 한쪽에 쏠려 있었는데(과거 8월 실적 -4.6~+4.1F),
     30년 평년으로 바꾸면 그 계통 오차가 해소된다.
     """
-    try:
-        sh = gc.open_by_key(WX_SHEET_ID)
-        tabs = {ws.title: _grid(ws) for ws in sh.worksheets()}
-    except Exception as e:
-        _log(f"날씨 시트 읽기 실패: {e}")
-        return None
-
-    obs = next((d for t, d in tabs.items()
-                if not d.empty and "temp_mean_f" in d.columns and "date" in d.columns), None)
-    if obs is None:
-        _log(f"기온 탭을 못 찾음 (탭: {list(tabs)})")
+    obs = read("wx")
+    if obs is None or obs.empty or "temp_mean_f" not in obs.columns or "date" not in obs.columns:
+        _log("기온 탭을 못 읽었거나 date/temp_mean_f 컬럼이 없다")
         return None
     w = pd.DataFrame({"date": pd.to_datetime(obs["date"], errors="coerce")})
     for c in ("temp_mean_f", "temp_max_f"):
         if c in obs.columns:
             w[c] = pd.to_numeric(obs[c], errors="coerce")
     w = w.dropna(subset=["date"]).drop_duplicates("date", keep="last")
-    # 기존 CSV 와 같은 region 값을 달아준다. 이게 없으면 (date, region) 중복제거에서
+    # 기존 CSV 와 같은 region 값을 달아준다. 없으면 (date, region) 중복제거에서
     # 시트 행과 CSV 행이 서로 다른 것으로 취급돼 같은 날이 두 번 남는다.
     w["region"] = "Texas 4-city average"
 
-    nrm = next((d for t, d in tabs.items()
-                if not d.empty and "normal_temp_mean_f" in d.columns), None)
-    if nrm is None:
-        _log("30년 평년값 탭 없음 — 자체 산출 평년을 계속 쓴다")
+    nrm = read("wxnorm")
+    if nrm is None or nrm.empty or "normal_temp_mean_f" not in nrm.columns:
+        _log("30년 평년값 탭 없음 — 자체 산출 평년(2.5년치)을 계속 쓴다")
     else:
         dcol = next((c for c in nrm.columns if "date" in c.lower()), None)
         n = pd.DataFrame({"_d": pd.to_datetime(nrm[dcol], errors="coerce")})
@@ -210,49 +261,49 @@ def fetch_weather(gc):
         n = n.drop(columns=["_d"]).drop_duplicates("_md", keep="last")
         w["_md"] = w.date.dt.strftime("%m-%d")
         w = w.merge(n, on="_md", how="left").drop(columns=["_md"])
-        cov = w["normal_temp_mean_f"].notna().sum() if "normal_temp_mean_f" in w.columns else 0
-        doys = w.loc[w.get("normal_temp_mean_f", pd.Series(dtype=float)).notna(), "date"]                 .dt.strftime("%m-%d").nunique() if cov else 0
+        cov = int(w["normal_temp_mean_f"].notna().sum()) if "normal_temp_mean_f" in w else 0
+        doys = int(w.loc[w["normal_temp_mean_f"].notna(), "date"].dt.strftime("%m-%d").nunique()) if cov else 0
         _log(f"30년 평년값 적용: {cov:,}일 / 달력일 {doys}종")
         if doys < 360:
             _log(f"  주의: 달력일 {doys}종만 평년이 붙었다. 나머지 날짜는 자체산출 평년을 쓴다"
-                 f" — 기준이 섞이므로 기온 시트의 관측 기간을 1년 이상으로 늘리는 게 좋다")
+                 f" — 기준이 섞이므로 기온 탭의 관측 기간을 1년 이상으로 늘리는 게 좋다")
     _log(f"기온 {len(w):,}일 ({w.date.min().date()} ~ {w.date.max().date()})")
     return w.sort_values("date")
 
 
 # ---------------------------------------------------------------- 진입점
 def materialize(outdir):
-    """시트를 읽어 CSV 로 떨어뜨리고 (ercot경로, 가스경로, 날씨경로) 를 돌려준다.
-    실패한 항목은 None. 전부 실패하면 (None, None, None) 이고 호출측은 CSV 만 쓴다."""
-    gc = _client()
-    if gc is None:
+    """시트를 읽어 CSV 로 떨어뜨리고 (ercot, 가스, 날씨) 경로를 돌려준다.
+    실패한 항목은 None. 아무것도 못 읽으면 (None, None, None) → 호출측은 CSV 만 쓴다."""
+    read, mode = make_reader()
+    if read is None:
         return None, None, None
+    _log(f"읽기 방식: {mode}")
     os.makedirs(outdir, exist_ok=True)
     ep = gp = wp = None
     try:
-        e = fetch_ercot(gc)
+        e = fetch_ercot(read)
         if e is not None and len(e):
             ep = os.path.join(outdir, "sheet_ercot.csv")
             e.to_csv(ep, index=False)
-            ts = _ts(e["Timestamp"])
+            ts = _ts(e["Timestamp"]).dropna()
             _log(f"ERCOT {len(e):,}행 ({ts.min().date()} ~ {ts.max().date()}) → {ep}")
     except Exception as ex:
-        _log(f"ERCOT 시트 실패: {ex}")
+        _log(f"ERCOT 처리 실패: {ex}")
     try:
-        g = fetch_gas(gc)
+        g = fetch_gas(read)
         if g is not None and len(g):
             gp = os.path.join(outdir, "sheet_gas_katy.csv")
-            # 가스 로더가 skiprows=1 을 전제하므로 헤더 한 줄을 얹는다
             with io.open(gp, "w", encoding="utf-8", newline="\n") as f:
-                f.write("*,Platts Katy FDt Com\n")
+                f.write("*,Platts Katy FDt Com\n")   # 가스 로더가 skiprows=1 을 전제한다
                 g.to_csv(f, index=False, header=["Date", "Close"])
     except Exception as ex:
-        _log(f"가스 시트 실패: {ex}")
+        _log(f"가스 처리 실패: {ex}")
     try:
-        w = fetch_weather(gc)
+        w = fetch_weather(read)
         if w is not None and len(w):
             wp = os.path.join(outdir, "sheet_weather.csv")
             w.to_csv(wp, index=False)
     except Exception as ex:
-        _log(f"날씨 시트 실패: {ex}")
+        _log(f"날씨 처리 실패: {ex}")
     return ep, gp, wp

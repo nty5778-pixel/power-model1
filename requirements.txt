@@ -5,5 +5,6 @@ numpy==1.26.4
 xgboost==2.1.1
 scikit-learn==1.5.1
 pydantic==2.9.2
+# 아래 둘은 '서비스 계정' 방식을 쓸 때만 필요. 웹 게시 CSV 방식이면 지워도 된다.
 gspread==6.1.4
 google-auth==2.35.0

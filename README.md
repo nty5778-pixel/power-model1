@@ -28,6 +28,7 @@ repo/
 ├── app.py                            FastAPI 래퍼
 ├── run_models_d1_d4_v4_weather.py    모델 본체 (CLI + 라이브러리 겸용)
 ├── backtest_walkforward.py           walk-forward 검증 — 배분 규칙 변경은 전부 여기를 통과한다
+├── sheets_source.py                  구글 시트 → CSV 모양으로 읽어오기 (웹게시 URL / 서비스계정)
 ├── requirements.txt
 ├── render.yaml
 ├── DEPLOY.md                         배포 절차 (사람이 직접 해야 하는 것만)
@@ -48,6 +49,8 @@ repo/
 | `PYTHON_VERSION` | `3.11` | 〃 |
 | `ALLOC_MODE` | (선택) 기본 `m1_only` | 배분 규칙. `m1_only` / `ensemble` |
 | `M1_DA_THRESHOLD` | (선택) 기본 `0.5` | m1_only 의 DA 전환 문턱. **올리지 말 것 — §5** |
+| `SHEET_CSV_HIST` 외 4개 | (선택) 웹 게시 CSV 주소 | 학습 데이터를 시트에서 최신으로 받는다 — DEPLOY.md §3-3 |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | (선택) 서비스 계정 JSON | `SHEET_CSV_*` 가 없을 때만 쓰인다 |
 
 **엔드포인트**
 
@@ -84,7 +87,11 @@ n8n 이 기록하지 않고 중단한다. 요청 단위로 `alloc` / `threshold`
   파일만 과거데이터로 인정한다. `Congesiton_*.csv` 도 `DA LMP` 를 갖고 있어서 예전 판별
   (`DA LMP` 보유 여부)로는 함께 로드됐고, concat 후 정상 행을 덮어써 `fc_load`/ENV Net
   Load/PRC 가 조용히 NaN 이 됐다. `data/` 에 파일을 추가할 때 이 규칙을 기억할 것.
-- 데이터 갱신은 별도 절차다. 월 1회 `data/` 를 최신 CSV 로 커밋 → 자동 재배포되는 흐름을 권장.
+- **데이터 갱신은 구글 시트가 담당한다.** `data/*.csv` 는 2026-06-24 에서 멈춰 있고,
+  `sheets_source.py` 가 매 요청마다 시트를 읽어 그 뒤를 잇는다. 2024~2025 는 CSV,
+  2026-01-01 부터는 시트가 이긴다(같은 시각이면 뒤에 온 시트 값 채택). 시트를 못 읽으면
+  CSV 만으로 계속 돈다 — 서비스는 죽지 않고 대신 `d0_gap_days` 가 커진다.
+  붙이는 방법 두 가지(웹 게시 CSV / 서비스 계정)는 DEPLOY.md §3-3.
 
 ---
 
