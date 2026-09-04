@@ -35,6 +35,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -79,10 +80,36 @@ def load_conf():
         die("api_key 에 들어가면 안 되는 문자가 섞여 있다 "
             f"(예: {bad[0]!r}).\n"
             "    복사할 때 앞뒤 글자나 줄바꿈이 딸려 왔을 수 있다. 다시 붙여넣을 것.")
-    if not c["base_url"].startswith(("http://", "https://")):
-        die(f"base_url 은 https:// 로 시작해야 한다 (지금: {c['base_url']})")
-    c["base_url"] = c["base_url"].rstrip("/")
+    c["base_url"] = normalize_base_url(c["base_url"])
     return c
+
+
+def normalize_base_url(raw):
+    """주소창에 보이는 걸 통째로 붙여넣어도 되게 앞부분만 남긴다.
+
+    https://내주소.app.n8n.cloud/home/workflows  →  https://내주소.app.n8n.cloud
+    """
+    u = raw.strip().strip('"').strip("'")
+    if not u.startswith(("http://", "https://")):
+        if "/" in u or "." in u:            # app.n8n.cloud/... 처럼 스킴만 빠뜨린 경우
+            u = "https://" + u
+        else:
+            die(f"base_url 이 주소로 보이지 않는다 (지금: {raw!r}).\n"
+                "    n8n 을 브라우저에서 열고 주소창에 보이는 주소를 그대로 붙여넣을 것.")
+    parts = urllib.parse.urlsplit(u)
+    if not parts.netloc:
+        die(f"base_url 에서 주소를 못 읽었다 (지금: {raw!r})")
+
+    host = parts.netloc.lower()
+    if host in ("app.n8n.cloud", "n8n.io", "www.n8n.io", "n8n.cloud"):
+        die(f"'{host}' 은 계정/요금 관리 화면이지 내 n8n 이 아니다.\n"
+            "    거기서 내 인스턴스를 열면 주소가 "
+            "https://<내주소>.app.n8n.cloud 로 바뀐다. 그 주소를 넣을 것.")
+
+    clean = f"{parts.scheme}://{parts.netloc}"
+    if clean != raw.strip().rstrip("/"):
+        print(f"   (주소를 {clean} 로 줄여서 씀)")
+    return clean
 
 
 def api(conf, method, path, body=None):

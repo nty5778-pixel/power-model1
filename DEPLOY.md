@@ -347,6 +347,21 @@ ERCOT 비밀번호, API 키 3개, Google Sheets 연결. 레포의 JSON 에는 �
 }
 ```
 
+**`base_url` 찾는 법** — n8n 을 브라우저에서 열고 **주소창을 그대로 복사**하면 된다.
+뒤에 `/home/workflows` 같은 게 붙어 있어도 스크립트가 알아서 잘라낸다.
+
+| 주소창에 이렇게 보이면 | 실제로 쓰는 값 |
+|---|---|
+| `https://내주소.app.n8n.cloud/home/workflows` | `https://내주소.app.n8n.cloud` |
+| `https://내주소.app.n8n.cloud/workflow/AbC123` | 〃 |
+
+⚠️ **`https://app.n8n.cloud/...` 는 아니다.** 앞에 내 이름이 없는 그 주소는 요금·계정
+관리 화면이다. 거기서 내 인스턴스를 열면 주소가 `내주소.app.n8n.cloud` 로 바뀐다.
+스크립트가 이 경우를 알아채고 따로 알려준다.
+
+**맞는지 확인** — `python push_n8n.py --dry-run` 을 돌렸을 때
+`n8n 에 있는 워크플로 N개 확인` 이 나오면 주소와 키가 둘 다 맞은 것이다.
+
 **쓰는 법**
 
 ```bash
