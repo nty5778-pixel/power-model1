@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>휴스턴 조달 데스크</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* ---------- tokens: light first ---------- */
+:root{
+  color-scheme: light;
+  --bg:#f3f5f3; --surface:#fdfdfc; --surface-2:#eef1ee; --line:#dfe4df; --line-2:#c9d0ca;
+  --ink:#172320; --ink-2:#4f5b57; --muted:#84908b;
+  --da:#2a78d6; --da-soft:#dbe8f9; --rt:#eb6834; --rt-soft:#fbe3d8;
+  --good:#0ca30c; --good-text:#006300; --good-soft:#e1f3e1;
+  --bad:#d03b3b; --bad-text:#b02a2a; --bad-soft:#f8e1e1;
+  --warn:#fab219; --warn-text:#8a5a00; --warn-soft:#fdf1d2;
+  --focus:#2a78d6;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#111514; --surface:#1a1f1d; --surface-2:#222826; --line:#2c3330; --line-2:#3a423e;
+    --ink:#f1f4f2; --ink-2:#b5bfba; --muted:#83908a;
+    --da:#3987e5; --da-soft:#1d3050; --rt:#e0602b; --rt-soft:#4a2a1c;
+    --good:#0ca30c; --good-text:#4fd24f; --good-soft:#173a17;
+    --bad:#e04a4a; --bad-text:#ff8080; --bad-soft:#4a1d1d;
+    --warn:#fab219; --warn-text:#ffd27a; --warn-soft:#3f3213;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#111514; --surface:#1a1f1d; --surface-2:#222826; --line:#2c3330; --line-2:#3a423e;
+  --ink:#f1f4f2; --ink-2:#b5bfba; --muted:#83908a;
+  --da:#3987e5; --da-soft:#1d3050; --rt:#e0602b; --rt-soft:#4a2a1c;
+  --good:#0ca30c; --good-text:#4fd24f; --good-soft:#173a17;
+  --bad:#e04a4a; --bad-text:#ff8080; --bad-soft:#4a1d1d;
+  --warn:#fab219; --warn-text:#ffd27a; --warn-soft:#3f3213;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--da)}
+a:focus-visible,button:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding:28px 24px 64px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- header ---------- */
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:18px;border-bottom:1px solid var(--line-2)}
+.eyebrow{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;font-family:var(--mono)}
+h1{font-size:26px;line-height:1.2;margin:4px 0 0;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--ink-2);margin-top:6px;max-width:62ch}
+.status{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:12.5px;color:var(--ink-2)}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;line-height:1.4;border:1px solid transparent;white-space:nowrap}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.live{background:var(--good-soft);color:var(--good-text);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+.pill.snap{background:var(--warn-soft);color:var(--warn-text);border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
+.pill.err{background:var(--bad-soft);color:var(--bad-text)}
+.pill.da{background:var(--da-soft);color:var(--da)}
+.pill.rt{background:var(--rt-soft);color:var(--rt)}
+.pill.mix{background:var(--da-soft);color:var(--da);border-color:var(--da)}
+.pill.neutral{background:var(--surface-2);color:var(--ink-2)}
+.pill.good{background:var(--good-soft);color:var(--good-text)}
+.pill.bad{background:var(--bad-soft);color:var(--bad-text)}
+.pill.warn{background:var(--warn-soft);color:var(--warn-text)}
+button.ghost,select.ghost{font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:5px 11px;cursor:pointer}
+button.ghost:hover,select.ghost:hover{border-color:var(--ink-2);color:var(--ink)}
+button.ghost:disabled{opacity:.4;cursor:default}
+button.ghost.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.seg{display:inline-flex;gap:4px;flex-wrap:wrap}
+
+/* ---------- sections ---------- */
+section{margin-top:36px}
+.sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+h2{font-size:17px;margin:0;font-weight:700;letter-spacing:-.005em}
+.sec-note{font-size:12.5px;color:var(--muted)}
+.lead{color:var(--ink-2);margin:0 0 14px;max-width:70ch}
+.runnav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.runnav select{max-width:320px}
+
+/* alerts */
+.alerts{display:grid;gap:8px;margin-top:20px}
+.alert{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface)}
+.alert .sev{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;padding:2px 7px;border-radius:6px;margin-top:2px;white-space:nowrap}
+.alert.critical{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.alert.critical .sev{background:var(--bad-soft);color:var(--bad-text)}
+.alert.warn{border-color:color-mix(in srgb,var(--warn) 60%,transparent)}
+.alert.warn .sev{background:var(--warn-soft);color:var(--warn-text)}
+.alert.ok .sev{background:var(--good-soft);color:var(--good-text)}
+.alert.info .sev{background:var(--surface-2);color:var(--ink-2)}
+.alert b{font-weight:600}
+.alert .why{color:var(--ink-2);font-size:13px;margin-top:2px}
+
+/* decision cards */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:900px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.cards{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px;position:relative}
+.card.next{border-color:var(--ink-2)}
+.card .h{display:flex;justify-content:space-between;align-items:baseline}
+.card .hz{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.06em}
+.card .date{font-size:15px;font-weight:700}
+.split{height:10px;border-radius:5px;background:var(--rt);overflow:hidden;display:flex}
+.split i{display:block;height:100%;background:var(--da)}
+.mw{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-2)}
+.mw b{color:var(--ink);font-weight:600}
+.score{display:grid;gap:4px}
+.score .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-2)}
+.gauge{position:relative;height:8px;border-radius:4px;background:var(--surface-2);overflow:visible}
+.gauge .fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--line-2)}
+.gauge .fill.over{background:var(--da)}
+.gauge .thr{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink);border-radius:1px}
+.card ul{margin:0;padding:0;list-style:none;display:grid;gap:5px;font-size:12.5px;color:var(--ink-2)}
+.card li{padding-left:12px;position:relative}
+.card li::before{content:"";position:absolute;left:0;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--line-2)}
+.card li.flag{color:var(--warn-text)}
+.card li.flag::before{background:var(--warn)}
+.card li.change{color:var(--ink)}
+.card li.change::before{background:var(--ink-2)}
+.card .outcome{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card .outcome span{color:var(--ink-2)}
+.commentary{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.commentary summary{cursor:pointer;font-weight:600;font-size:13.5px;color:var(--ink-2)}
+.commentary p{margin:10px 0 0;color:var(--ink-2);max-width:78ch;font-size:13.5px}
+.commentary .disc{font-size:12px;color:var(--muted);margin-top:8px}
+
+/* KPI tiles */
+.tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+@media (max-width:980px){.tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:600px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:3px;align-content:start}
+.tile .k{font-size:12px;color:var(--muted);font-weight:600}
+.tile .v{font-size:24px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
+.tile .v small{font-size:13px;font-weight:500;color:var(--ink-2);margin-left:3px}
+.tile .d{font-size:12px;color:var(--ink-2)}
+.tile.good .v{color:var(--good-text)}
+.tile.bad .v{color:var(--bad-text)}
+
+/* chart */
+.chart-wrap{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 8px;margin-top:14px;position:relative}
+.chart-wrap .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-bottom:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:5px}
+.legend i.hollow{background:transparent;border:2px solid var(--muted);width:11px;height:11px}
+.legend i.ring{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--ink)}
+.chart-scroll{overflow-x:auto}
+svg.chart{display:block;height:auto;font-family:var(--mono);font-size:11px}
+svg .grid{stroke:var(--line);stroke-width:1}
+svg .axis{stroke:var(--line-2);stroke-width:1}
+svg .tick{fill:var(--muted)}
+svg .stem{stroke:var(--line-2);stroke-width:2;stroke-linecap:round}
+svg .stem.big{stroke:var(--ink-2)}
+svg .dl{fill:var(--ink-2);font-weight:600}
+svg .hit-area{fill:transparent;cursor:default}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:8px 10px;border-radius:8px;line-height:1.45;max-width:260px;display:none;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.tip b{font-weight:600}
+.tip .row{display:flex;justify-content:space-between;gap:14px}
+
+/* tables */
+.tbl-wrap{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-top:14px;max-height:560px}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}
+th,td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.03em;text-align:right;background:var(--surface-2);position:sticky;top:0;z-index:1}
+th:first-child,td:first-child{text-align:left}
+th.l,td.l{text-align:left}
+tr:last-child td{border-bottom:0}
+td.pos{color:var(--bad-text)}
+td.neg{color:var(--good-text)}
+td .mk{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:0}
+td .mk.da{background:var(--da)}
+td .mk.rt{background:var(--rt)}
+tr.big td:first-child{box-shadow:inset 3px 0 0 var(--ink-2)}
+tfoot td{font-weight:600;background:var(--surface-2);border-top:1px solid var(--line-2);position:sticky;bottom:0}
+.monthly table{min-width:680px}
+
+/* matrix */
+.matrix{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-top:14px;max-height:560px}
+.matrix table{min-width:620px}
+.matrix td{text-align:center;padding:7px 10px}
+.matrix th{text-align:center}
+.matrix td.l,.matrix th.l{text-align:left}
+.matrix tr.sel td{background:var(--surface-2)}
+.cell{display:inline-block;min-width:54px;padding:3px 6px;border-radius:6px;font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink-2);background:var(--surface-2)}
+.cell.da{background:var(--da);color:#fff}
+.cell.mix{background:var(--da-soft);color:var(--da);font-weight:600}
+.cell.empty{background:transparent;color:var(--line-2)}
+.cell.actual-da{background:var(--da-soft);color:var(--da);font-weight:600}
+.cell.actual-rt{background:var(--rt-soft);color:var(--rt);font-weight:600}
+.cell.pending{background:transparent;color:var(--muted);font-style:italic}
+.chk{font-weight:700;margin-left:4px}
+.chk.y{color:var(--good-text)}.chk.n{color:var(--bad-text)}
+
+/* lookback */
+.lb{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.lb .empty{color:var(--ink-2)}
+
+/* glossary */
+.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 24px;font-size:13px;color:var(--ink-2)}
+.gloss dt{font-weight:600;color:var(--ink)}
+.gloss dd{margin:2px 0 0}
+.gloss div{padding:8px 0;border-bottom:1px solid var(--line)}
+footer{margin-top:40px;font-size:12px;color:var(--muted)}
+.hidden{display:none !important}
+#error{margin-top:24px;padding:16px;border:1px solid var(--bad);border-radius:12px;background:var(--bad-soft);color:var(--bad-text)}
+#error code{font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">ERCOT · LZ_HOUSTON · 100 MW · 하루전(DA) / 실시간(RT) 배분</div>
+      <h1>휴스턴 조달 데스크</h1>
+      <div class="sub">모델이 매일 내는 "내일부터 나흘, 어느 시장에서 살지" 결정을 해석하고, 확정된 정산 가격과 대조해 그 결정이 돈을 벌었는지 봅니다.</div>
+    </div>
+    <div class="status" id="status">
+      <span class="pill neutral"><span class="dot"></span>시트 읽는 중…</span>
+    </div>
+  </header>
+
+  <div id="error" class="hidden"></div>
+  <div class="alerts" id="alerts"></div>
+
+  <section id="sec-today">
+    <div class="sec-head">
+      <h2 id="today-title">오늘의 결정</h2>
+      <div class="runnav" id="runnav"></div>
+    </div>
+    <p class="lead" id="today-lead"></p>
+    <div class="cards" id="cards"></div>
+    <details class="commentary" id="commentary"></details>
+  </section>
+
+  <section id="sec-score">
+    <div class="sec-head">
+      <h2>실적 대조 — 결정이 돈을 벌었나</h2>
+      <div class="seg" id="range"></div>
+    </div>
+    <p class="lead" id="score-lead"></p>
+    <div class="tiles" id="tiles"></div>
+    <div class="chart-wrap" id="chart-wrap">
+      <div class="legend">
+        <span><i style="background:var(--da)"></i>하루전(DA) 가격</span>
+        <span><i style="background:var(--rt)"></i>실시간(RT) 가격</span>
+        <span><i class="ring" style="background:var(--muted)"></i>우리가 산 시장</span>
+        <span><i class="hollow"></i>안 산 시장</span>
+      </div>
+      <div class="chart-scroll" id="chart"></div>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="tbl-wrap" id="score-table"></div>
+    <div class="sec-head" style="margin-top:24px"><h2 style="font-size:15px">월별 누적</h2><span class="sec-note">기간 필터와 무관하게 전체 기록</span></div>
+    <div class="tbl-wrap monthly" id="monthly"></div>
+  </section>
+
+  <section id="sec-matrix">
+    <div class="sec-head"><h2>결정이 흔들렸나 — 같은 날을 나흘 전부터 본 기록</h2><span class="sec-note">칸의 숫자는 모델 점수(0~1). 문턱을 넘으면 파랑(DA) · 행을 누르면 그 날의 결정으로 이동</span></div>
+    <p class="lead">한 날짜는 D+4 부터 D+1 까지 네 번 예측됩니다. 실제 매수에 쓰는 것은 D+1 뿐이지만, 앞선 예측이 오락가락하면 그 날은 판단이 불안정했다는 뜻입니다.</p>
+    <div class="matrix" id="matrix"></div>
+  </section>
+
+  <section id="sec-lookback">
+    <div class="sec-head"><h2>주간 리뷰</h2><span class="sec-note">매주 월요일 자동 기록 · 볼 것은 "큰 날 적중률" 한 칸</span></div>
+    <div class="lb" id="lookback"></div>
+  </section>
+
+  <section id="sec-checks">
+    <div class="sec-head"><h2>시스템 점검</h2><span class="sec-note">위 경보 포함, 전체 항목</span></div>
+    <div class="alerts" id="checks"></div>
+  </section>
+
+  <section id="sec-gloss">
+    <div class="sec-head"><h2>읽는 법</h2></div>
+    <dl class="gloss">
+      <div><dt>하루전(DA) · 실시간(RT)</dt><dd>전력을 사는 두 시장. DA 는 전날 오전 10시(중부시간)까지 내일 물량을 확정하는 시장, RT 는 당일 실시간으로 정산되는 시장입니다.</dd></div>
+      <div><dt>가격차 (RT − DA)</dt><dd>양수면 그날 DA 가 쌌고, 음수면 RT 가 쌌습니다. 절댓값이 $20 을 넘는 "큰 날"에서 이익의 대부분이 납니다.</dd></div>
+      <div><dt>모델 점수와 문턱</dt><dd>"내일 DA 가 더 쌀 것 같다"는 점수(0~1). 문턱(보통 0.5)을 넘는 날만 전량 DA, 아니면 평소대로 RT. 점수가 높다고 더 확실한 것은 아닙니다 — 과거 검증에서 0.6 이상 구간은 오히려 손해였습니다.</dd></div>
+      <div><dt>맞음 / 틀림</dt><dd>우리가 고른 시장이 실제로 더 쌌으면 맞음. 전체 적중률로는 판단하지 마세요 — "항상 RT" 가 늘 더 높게 나옵니다. 돈은 큰 날에서 갈립니다.</dd></div>
+      <div><dt>금액 (100 MW 기준)</dt><dd>$/MWh 차이 × 100 MW × 24시간. RT 를 그대로 산 날은 "항상 RT" 와 원가가 같아 0 입니다.</dd></div>
+      <div><dt>이상기온 조정</dt><dd>평년보다 크게 덥거나 추운 날은 규칙과 별개로 최대 30 MW 까지 DA 를 섞습니다. 그 날은 배분이 0/100 이 아닌 중간값이 됩니다.</dd></div>
+      <div><dt>수급 표시 (highNL, lowRen)</dt><dd>순부하가 높거나(빡빡) 재생에너지가 적은 날이라는 참고 표시. 배분 자체에는 영향을 주지 않습니다.</dd></div>
+      <div><dt>학습 데이터 기준일</dt><dd>모델이 "최근 시장" 이라고 믿는 마지막 날짜. 예측일과 2~3일 차이가 정상이며, 몇 주 이상 벌어지면 낡은 시장을 보고 결정하는 것입니다.</dd></div>
+      <div><dt>데이터 출처 표시</dt><dd>"시트 실시간" 은 이 화면을 열 때 구글 시트를 직접 읽은 것이고, 30분마다 다시 읽습니다. "스냅샷" 은 시트에 연결하지 못해 저장된 복사본을 보여주는 것입니다.</dd></div>
+    </dl>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+/* =========================================================
+   설정
+   ========================================================= */
+const SHEET_ID = '1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24';
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
+const TABS = ['predictions', 'analysis', 'lookback'];
+const VOLUME_MW = 100, HOURS = 24;          // 금액 환산 기준 (HANDOFF §6: 연 30만달러 = $0.345/MWh × 100MW × 24h × 365)
+const BIG = 20;                              // "큰 날" 기준 |RT−DA| ≥ $20
+const NEAR = 0.05;                           // 문턱 근처 판정 폭
+const BID_DEADLINE_CT = 10;                  // DA 입찰 마감 10:00 CT
+const MIN_BIG_N = 10;                        // 큰 날 적중률 판정 최소 표본
+const REFRESH_MS = 30 * 60 * 1000;           // 실시간 모드 자동 갱신 주기
+const RANGES = [['30', '최근 30일'], ['90', '최근 90일'], ['365', '최근 1년'], ['all', '전체']];
+
+/* =========================================================
+   유틸
+   ========================================================= */
+const $ = s => document.querySelector(s);
+const num = v => { if (v === null || v === undefined || v === '') return null; if (typeof v === 'number') return isFinite(v) ? v : null; const n = parseFloat(String(v).replace(/,/g, '')); return isNaN(n) ? null : n; };
+const str = v => v == null ? '' : String(v).trim();
+const none = v => { const s = str(v); return s === '' || s === '-'; };
+const isTrue = v => v === true || str(v).toUpperCase() === 'TRUE';
+const esc = s => str(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const WD = ['일', '월', '화', '수', '목', '금', '토'];
+const dISO = s => { const m = str(s).match(/(\d{4})-(\d{1,2})-(\d{1,2})/); return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : ''; };
+const dUTC = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+const dayDiff = (a, b) => Math.round((dUTC(a) - dUTC(b)) / 86400000);
+const addDays = (iso, n) => new Date(dUTC(iso) + n * 86400000).toISOString().slice(0, 10);
+const md = iso => { const [, m, d] = iso.split('-'); return `${+m}/${+d}`; };
+const mdw = iso => `${md(iso)} (${WD[new Date(dUTC(iso)).getUTCDay()]})`;
+const ymd = iso => { const [y, m, d] = iso.split('-'); return `${y}.${+m}.${+d}`; };
+const parseUTC = s => { const m = str(s).match(/(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/); if (!m) return null; return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0))); };
+const fmtTZ = (d, tz, withDate = true) => { if (!d) return '—'; const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d).map(x => [x.type, x.value])); const hm = `${p.hour === '24' ? '00' : p.hour}:${p.minute}`; return withDate ? `${p.month}/${p.day} ${hm}` : hm; };
+const dateTZ = (d, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+const hourCT = d => +new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }).format(d).replace(/\D/g, '') % 24;
+const todayCT = () => dateTZ(new Date(), 'America/Chicago');
+const usd = (v, digits = 0) => { if (v == null) return '—'; const s = Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits }); return (v < 0 ? '−$' : '$') + s; };
+const usd2 = v => usd(v, 2);
+const signed = (v, digits = 2) => v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(digits);
+const pct = (a, b) => b ? Math.round(a / b * 100) : null;
+const money = v => v === 0 ? '$0' : (v < 0 ? usd(-v) + ' 절약' : usd(v) + ' 손해');
+const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+
+/* =========================================================
+   시트 읽기 1: JSONP — 공개 시트를 서버 없이 브라우저에서 직접
+   ========================================================= */
+function jsonp(tab) {
+  return new Promise((resolve, reject) => {
+    const cb = 'gv_' + tab + '_' + Math.random().toString(36).slice(2);
+    const s = document.createElement('script');
+    const t = setTimeout(() => { done(); reject(new Error(tab + ': 20초 안에 응답 없음')); }, 20000);
+    function done() { clearTimeout(t); try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); }
+    window[cb] = resp => { done(); if (!resp || resp.status !== 'ok') return reject(new Error(tab + ': ' + JSON.stringify((resp && resp.errors) || resp))); resolve(tableToRows(resp.table)); };
+    s.onerror = () => { done(); reject(new Error(tab + ': 스크립트 로드 실패 (시트 공유 설정 또는 네트워크)')); };
+    s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json;responseHandler:${cb}&sheet=${tab}&headers=1&_=${Date.now()}`;
+    document.head.appendChild(s);
+  });
+}
+function tableToRows(t) {
+  const cols = t.cols.map(c => str(c.label) || c.id);
+  return t.rows.map(r => { const o = {}; (r.c || []).forEach((c, i) => { if (!c) { o[cols[i]] = null; return; } const ty = t.cols[i].type; o[cols[i]] = (ty === 'date' || ty === 'datetime') ? (c.f != null ? c.f : c.v) : c.v; }); return o; });
+}
+async function loadJsonp() {
+  const [predictions, analysis, lookback] = await Promise.all(TABS.map(jsonp));
+  return { predictions, analysis, lookback };
+}
+
+/* =========================================================
+   시트 읽기 2: 게시된 페이지에서는 보는 사람의 Google Drive 연결로 읽는다
+   (스크립트 직접 로드가 막혀 있음). 응답은 마크다운 표 → 행으로 변환.
+   ========================================================= */
+function parseDriveMarkdown(txt) {
+  const out = {};
+  const cells = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(c => c.trim().replace(/\\([_\-~*|#\\])/g, '$1'));
+  txt.split(/\n\s*\n/).forEach(b => {
+    const lines = b.split('\n').filter(l => l.trim().startsWith('|'));
+    const hi = lines.findIndex(l => !/^\|[\s:|-]*\|$/.test(l.trim()));
+    if (hi < 0) return;
+    const hdr = cells(lines[hi]);
+    const rows = lines.slice(hi + 1).map(l => { const c = cells(l); const o = {}; hdr.forEach((h, i) => { o[h] = (c[i] == null || c[i] === '') ? null : c[i]; }); return o; });
+    const key = hdr.includes('horizon') ? 'predictions' : hdr.includes('input_tokens') ? 'analysis' : hdr.includes('hit_rate_big20') ? 'lookback' : null;
+    if (key && !out[key]) out[key] = rows;
+  });
+  if (!out.predictions) throw new Error('Drive 응답에서 predictions 표를 찾지 못함');
+  return { predictions: out.predictions, analysis: out.analysis || [], lookback: out.lookback || [] };
+}
+function loadDrive(onUpdate) {
+  return new Promise(async (resolve, reject) => {
+    if (!(window.claude && typeof window.claude.use === 'function')) return reject(new Error('no claude runtime'));
+    let mcp; try { mcp = await window.claude.use('mcp'); } catch (e) { mcp = null; }
+    if (!mcp) return reject(new Error('Google Drive 연결 없음'));
+    let first = true;
+    const t = setTimeout(() => { if (first) { first = false; reject(new Error('Drive 응답 대기 시간 초과')); } }, 25000);
+    try {
+      mcp.watchTool('Google Drive', 'read_file_content', { fileId: SHEET_ID }, ev => {
+        if (ev.type === 'error') { if (first) { first = false; clearTimeout(t); reject(new Error('Drive: ' + (ev.error && ev.error.code))); } return; }
+        let data; try { const p = ev.result.payload; const txt = (p && typeof p === 'object' && p.fileContent) ? p.fileContent : String(p || ''); data = parseDriveMarkdown(txt); } catch (e) { if (first) { first = false; clearTimeout(t); reject(e); } return; }
+        const at = ev.result.cache && ev.result.cache.storedAt ? new Date(ev.result.cache.storedAt) : new Date();
+        if (first) { first = false; clearTimeout(t); resolve({ data, at }); } else onUpdate({ data, at });
+      }, { refetchInterval: REFRESH_MS });
+    } catch (e) { if (first) { first = false; clearTimeout(t); reject(e); } }
+  });
+}
+
+/* =========================================================
+   데이터 정리
+   ========================================================= */
+function prep(preds) {
+  return preds.filter(r => dISO(r.target_date)).map(r => ({
+    run: str(r.run_id), gen: parseUTC(r.generated_at),
+    mode: str(r.alloc_mode), thr: num(r.m1_threshold) ?? 0.5, d0: dISO(r.d0_last_actual),
+    hn: +((str(r.horizon).match(/\d+/) || [0])[0]), date: dISO(r.target_date),
+    m1: num(r.M1_P_DA_cheaper), m2: num(r.M2_DA_pred_USD), gate: isTrue(r.M3_gate_signal), gateWhy: none(r.M3_gate_reason) ? '' : str(r.M3_gate_reason),
+    m4: num(r.M4_premium_prob), tanom: num(r.WX_t_anom_F), overlay: none(r.WX_overlay) ? '' : str(r.WX_overlay),
+    daf: num(r.DA_fraction), daMW: num(r.DA_MW), rtMW: num(r.RT_MW),
+    da: num(r.DA_actual), rt: num(r.RT_actual), dart: num(r.DART_actual), blended: num(r.blended_cost),
+    hit: none(r.hit) ? null : str(r.hit).toUpperCase() === 'Y',
+  }));
+}
+function decision(r) {
+  if (r.daf == null) return { kind: 'na', label: '값 없음' };
+  if (r.daf >= 0.99) return { kind: 'da', label: '전량 하루전(DA) 매수' };
+  if (r.daf <= 0.01) return { kind: 'rt', label: '실시간(RT) 유지' };
+  return { kind: 'mix', label: `DA ${Math.round(r.daf * 100)}% · RT ${Math.round((1 - r.daf) * 100)}%` };
+}
+const bought = r => r.daf == null ? null : (r.daf > 0.5 ? 'da' : 'rt');
+function latestByDateHorizon(rows) {
+  const m = new Map();
+  rows.forEach(r => { const k = r.date + '|' + r.hn; const p = m.get(k); if (!p || r.run > p.run) m.set(k, r); });
+  return [...m.values()];
+}
+function scoreRows(rows) {
+  const out = latestByDateHorizon(rows).filter(r => r.hn === 1 && r.da != null && r.rt != null).sort((a, b) => a.date < b.date ? -1 : 1);
+  out.forEach(r => {
+    r.dart = r.dart != null ? r.dart : r.rt - r.da;
+    r.blended = r.blended != null ? r.blended : (r.daf * r.da + (1 - r.daf) * r.rt);
+    r.vsRT = r.blended - r.rt; r.vsDA = r.blended - r.da;
+    r.usd = r.vsRT * VOLUME_MW * HOURS;                 // 항상 RT 대비 실제 금액 (음수 = 절약)
+    r.daWould = (r.da - r.rt) * VOLUME_MW * HOURS;      // 전량 DA 였다면 RT 대비 (음수 = DA 가 쌌음)
+    r.big = Math.abs(r.dart) >= BIG;
+    if (r.hit == null) r.hit = (r.daf > 0.5) === (r.dart > 0);
+  });
+  return out;
+}
+
+/* =========================================================
+   해석 문장
+   ========================================================= */
+function explain(r, prev) {
+  const out = [];
+  const dec = decision(r);
+  if (r.m1 != null) {
+    const gap = r.m1 - r.thr;
+    if (Math.abs(gap) <= NEAR) out.push({ t: `점수 ${r.m1.toFixed(2)} 가 문턱 ${r.thr} 바로 옆 — 다음 산출에서 뒤집힐 수 있는 날`, f: true });
+    else if (gap > 0) out.push({ t: `점수 ${r.m1.toFixed(2)} 가 문턱 ${r.thr} 을 넘어 DA 로 전환` });
+    else out.push({ t: `점수 ${r.m1.toFixed(2)} 는 문턱 ${r.thr} 미달 — 평소대로 RT` });
+    if (r.m1 >= 0.6) out.push({ t: '점수가 높다고 더 확실한 것은 아님 (0.6 이상은 과거에 손해 구간)', f: true });
+  }
+  if (dec.kind === 'mix') {
+    if (r.overlay) out.push({ t: `이상기온 조정(${r.overlay}) 으로 DA ${r.daMW != null ? r.daMW.toFixed(1) : '?'} MW 추가` });
+    else out.push({ t: '이상기온 표시 없이 중간 배분 — 운영 규칙이 ensemble 로 도는지 확인', f: true });
+  } else if (r.overlay) out.push({ t: `이상기온(${r.overlay}) 표시됨` });
+  if (r.tanom != null && Math.abs(r.tanom) >= 5) out.push({ t: `평년보다 ${r.tanom > 0 ? '+' : '−'}${Math.abs(r.tanom).toFixed(1)}°F ${r.tanom > 0 ? '더움' : '추움'}` });
+  if (r.gate && r.gateWhy) {
+    const w = []; if (/highNL/i.test(r.gateWhy)) w.push('수급 빡빡(순부하 높음)'); if (/lowRen/i.test(r.gateWhy)) w.push('재생에너지 적음');
+    out.push({ t: (w.join(' · ') || r.gateWhy) + ' — 참고 표시, 배분엔 영향 없음' });
+  }
+  if (r.m2 != null) out.push({ t: `참고: DA 가격 예상 ${usd2(r.m2)}/MWh (배분에 안 씀)` });
+  if (prev) {
+    const pd = decision(prev);
+    if (pd.kind !== dec.kind) out.push({ t: `D+${prev.hn} 때는 "${pd.label}" (점수 ${prev.m1 != null ? prev.m1.toFixed(2) : '?'}) → 이번에 바뀜`, c: true });
+    else out.push({ t: `D+${prev.hn} 때와 같은 결정 (점수 ${prev.m1 != null ? prev.m1.toFixed(2) : '?'} → ${r.m1 != null ? r.m1.toFixed(2) : '?'})` });
+  }
+  return out;
+}
+
+/* =========================================================
+   상태 + 렌더
+   ========================================================= */
+const STATE = { data: null, meta: {}, runId: null, range: '90' };
+function setData(data, meta) { STATE.data = data; STATE.meta = meta; render(); }
+function selectRun(id) { STATE.runId = id; render(); const el = $('#sec-today'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+function setRange(r) { STATE.range = r; render(); }
+
+function render() {
+  const data = STATE.data, meta = STATE.meta;
+  const preds = prep(data.predictions || []);
+  const analysis = data.analysis || [];
+  const lookback = (data.lookback || []).filter(r => str(r.logged_at));
+  const today = todayCT();
+  const now = new Date();
+  const runs = [...new Set(preds.map(r => r.run))].sort();
+  const lastRun = runs[runs.length - 1];
+  if (!runs.includes(STATE.runId)) STATE.runId = null;
+  const curRun = STATE.runId || lastRun;
+  const isLatest = curRun === lastRun;
+  const latest = preds.filter(r => r.run === lastRun).sort((a, b) => a.hn - b.hn);
+  const cur = preds.filter(r => r.run === curRun).sort((a, b) => a.hn - b.hn);
+  const genLatest = latest[0] && latest[0].gen, gen = cur[0] && cur[0].gen;
+  const byKey = new Map(latestByDateHorizon(preds).map(r => [r.date + '|' + r.hn, r]));
+  const scoredAll = scoreRows(preds);
+  const scoredMap = new Map(scoredAll.map(r => [r.date, r]));
+
+  // ---- 상태 표시줄
+  const src = meta.source === 'jsonp' ? `시트 실시간 · ${fmtTZ(meta.at, 'Asia/Seoul')} 읽음`
+    : meta.source === 'drive' ? `시트 실시간 (Google Drive 연결) · ${fmtTZ(meta.at, 'Asia/Seoul')} 읽음`
+    : `스냅샷 ${esc(meta.at || '')} 기준 · 시트 실시간 연결 안 됨`;
+  $('#status').innerHTML = [
+    `<span class="pill ${meta.source === 'snapshot' ? 'snap' : 'live'}"><span class="dot"></span>${src}</span>`,
+    `<span>오늘 <b class="num">${mdw(today)}</b> 중부 · 마지막 예측 <b class="num">${fmtTZ(genLatest, 'Asia/Seoul')}</b> 한국 <span class="num">(${fmtTZ(genLatest, 'America/Chicago')} 중부)</span></span>`,
+    `<a href="${SHEET_URL}" target="_blank" rel="noopener">시트 열기</a>`,
+    `<button class="ghost" type="button" onclick="location.reload()">새로고침</button>`,
+  ].join('');
+
+  // ---- 결정 (실행 선택기)
+  const idx = runs.indexOf(curRun);
+  const runLabel = id => { const rr = preds.filter(r => r.run === id).sort((a, b) => a.hn - b.hn); const g = rr[0] && rr[0].gen; return `${g ? fmtTZ(g, 'Asia/Seoul') : id} 실행 → ${rr.length ? md(rr[0].date) + '~' + md(rr[rr.length - 1].date) : ''}`; };
+  $('#runnav').innerHTML = `
+    <button class="ghost" type="button" ${idx <= 0 ? 'disabled' : ''} onclick="selectRun('${runs[idx - 1] || ''}')">◀ 이전</button>
+    <select class="ghost" onchange="selectRun(this.value)">${runs.slice().reverse().map(id => `<option value="${id}" ${id === curRun ? 'selected' : ''}>${esc(runLabel(id))}${id === lastRun ? ' (최신)' : ''}</option>`).join('')}</select>
+    <button class="ghost" type="button" ${idx >= runs.length - 1 ? 'disabled' : ''} onclick="selectRun('${runs[idx + 1] || ''}')">다음 ▶</button>
+    ${isLatest ? '' : `<button class="ghost on" type="button" onclick="selectRun(null)">최신으로</button>`}`;
+  $('#today-title').textContent = isLatest ? '오늘의 결정' : `${gen ? ymd(dateTZ(gen, 'Asia/Seoul')) : curRun} 의 결정 (과거 기록)`;
+  const nDA = cur.filter(r => decision(r).kind === 'da').length, nMix = cur.filter(r => decision(r).kind === 'mix').length;
+  $('#today-lead').textContent = cur.length
+    ? (nDA === 0 && nMix === 0 ? `나흘 모두 평소대로 실시간(RT) 시장에서 ${VOLUME_MW} MW 를 삽니다. 모델 점수가 어느 날도 문턱을 넘지 않았습니다.`
+      : `${nDA ? `${nDA}일은 전량 하루전(DA) 매수` : ''}${nDA && nMix ? ', ' : ''}${nMix ? `${nMix}일은 이상기온 조정으로 일부 DA` : ''}, 나머지는 실시간(RT) 유지입니다.`)
+      + ` (규칙 ${cur[0].mode} · 문턱 ${cur[0].thr} · 실행 ${curRun})`
+    : '예측 기록이 없습니다.';
+  $('#cards').innerHTML = cur.map(r => {
+    const dec = decision(r);
+    const prev = byKey.get(r.date + '|' + (r.hn + 1));
+    const daPct = Math.round((r.daf || 0) * 100);
+    const score = r.m1 == null ? 0 : Math.max(0, Math.min(1, r.m1));
+    const isNext = r.hn === 1;
+    const s = scoredMap.get(r.date);
+    const outcome = s ? (() => { const ok = (r.daf > 0.5) === (s.dart > 0); return `<div class="outcome"><span>실제 ${s.dart > 0 ? 'DA' : 'RT'} 가 ${usd2(Math.abs(s.dart))} 쌌음${isNext ? ' · ' + money(s.usd) : ''}</span><span class="pill ${ok ? 'good' : 'bad'}">${ok ? '맞음' : '틀림'}</span></div>`; })()
+      : (r.date < today ? `<div class="outcome"><span>정산 대기</span></div>` : '');
+    return `<div class="card${isNext ? ' next' : ''}">
+      <div class="h"><span class="hz">D+${r.hn}${isNext ? (isLatest ? ' · 내일' : ' · 실제 매수') : ''}</span><span class="date">${mdw(r.date)}</span></div>
+      <span class="pill ${dec.kind === 'na' ? 'neutral' : dec.kind}">${esc(dec.label)}</span>
+      <div class="split" title="파랑 DA / 주황 RT"><i style="width:${daPct}%"></i></div>
+      <div class="mw"><span>DA <b class="num">${r.daMW != null ? +r.daMW.toFixed(1) : '—'}</b> MW</span><span>RT <b class="num">${r.rtMW != null ? +r.rtMW.toFixed(1) : '—'}</b> MW</span></div>
+      <div class="score"><div class="lbl"><span>모델 점수 "DA 가 쌀 것"</span><b class="num">${r.m1 != null ? r.m1.toFixed(3) : '—'}</b></div>
+        <div class="gauge"><div class="fill${score >= r.thr ? ' over' : ''}" style="width:${score * 100}%"></div><div class="thr" style="left:${r.thr * 100}%" title="문턱 ${r.thr}"></div></div></div>
+      <ul>${explain(r, prev).map(x => `<li class="${x.f ? 'flag' : x.c ? 'change' : ''}">${esc(x.t)}</li>`).join('')}</ul>
+      ${outcome}
+    </div>`;
+  }).join('');
+  const ana = analysis.filter(a => str(a.run_id) === curRun).pop();
+  $('#commentary').innerHTML = ana
+    ? `<summary>이 실행에 대한 자동 해설 (${esc(str(ana.model))})</summary><p>${esc(ana.commentary)}</p><div class="disc">자동 생성 텍스트라 검증되지 않았습니다. 매수 근거로 쓰지 말고 참고만 하세요.</div>`
+    : `<summary>이 실행에는 자동 해설 기록이 없습니다</summary>`;
+
+  // ---- 실적 대조 (기간 필터)
+  $('#range').innerHTML = RANGES.map(([k, l]) => `<button class="ghost${STATE.range === k ? ' on' : ''}" type="button" onclick="setRange('${k}')">${l}</button>`).join('');
+  const since = STATE.range === 'all' ? null : addDays(today, -(+STATE.range));
+  const scored = since ? scoredAll.filter(r => r.date >= since) : scoredAll;
+  const n = scored.length, hits = scored.filter(r => r.hit).length, big = scored.filter(r => r.big), bigHits = big.filter(r => r.hit).length;
+  const cB = mean(scored.map(r => r.blended)), cRT = mean(scored.map(r => r.rt)), cDA = mean(scored.map(r => r.da));
+  const totUSD = scored.reduce((s, r) => s + r.usd, 0);
+  const totDAWould = scored.reduce((s, r) => s + r.daWould, 0);
+  const nDAdays = scored.filter(r => r.daf > 0.5).length;
+  const rangeName = RANGES.find(x => x[0] === STATE.range)[1];
+  $('#score-lead').textContent = n
+    ? `${rangeName}에 채점된 ${n}일 동안 우리 결정의 평균 원가는 ${usd2(cB)}/MWh 로 "항상 RT" (${usd2(cRT)}) 대비 ${totUSD === 0 ? '차이가 없고' : (totUSD < 0 ? usd(-totUSD) + ' 절약이고' : usd(totUSD) + ' 손해이고')}, "항상 DA" (${usd2(cDA)}) 를 골랐다면 ${totDAWould < 0 ? usd(-totDAWould) + ' 를 아꼈을' : usd(totDAWould) + ' 를 더 냈을'} 기간입니다.${nDAdays === 0 ? ' 이 기간에 DA 를 산 날이 없어 원가는 "항상 RT" 와 같습니다.' : ''}`
+    : (scoredAll.length ? `${rangeName}에는 채점된 날이 없습니다. 기간을 넓혀 보세요.` : '아직 정산 실적이 채워진 날이 없습니다.');
+  const bigJudge = big.length >= MIN_BIG_N ? (bigHits / big.length >= 0.5 ? 'good' : 'bad') : '';
+  $('#tiles').innerHTML = [
+    tile('채점된 날', `${n}<small>일</small>`, n ? `${md(scored[0].date)} ~ ${md(scored[n - 1].date)} · DA 매수 ${nDAdays}일` : '—'),
+    tile('우리 원가 vs 항상 RT', n ? `${usd2(cB - cRT)}<small>/MWh</small>` : '—', n ? `${VOLUME_MW}MW 환산 ${money(totUSD)}` : '—', totUSD < 0 ? 'good' : totUSD > 0 ? 'bad' : ''),
+    tile('항상 DA 였다면', n ? `${usd2(cDA - cRT)}<small>/MWh</small>` : '—', n ? `RT 대비 ${totDAWould < 0 ? usd(-totDAWould) + ' 쌌음' : usd(totDAWould) + ' 비쌌음'}` : '—'),
+    tile('방향 맞힌 날', n ? `${hits}<small>/ ${n}</small>` : '—', n ? `${pct(hits, n)}% · 판단 기준 아님 (읽는 법 참조)` : '—'),
+    tile(`큰 날 적중 (|차이| ≥ $${BIG})`, big.length ? `${bigHits}<small>/ ${big.length}</small>` : '0<small>일</small>', big.length >= MIN_BIG_N ? `${pct(bigHits, big.length)}% · 50% 미만이면 경보` : `표본 ${big.length}일 — ${MIN_BIG_N}일 넘어야 판정`, bigJudge),
+  ].join('');
+  renderChart(scored);
+  $('#score-table').innerHTML = n ? `<table>
+    <thead><tr><th class="l">정산일</th><th class="l">우리 결정</th><th>DA 가격</th><th>RT 가격</th><th>차이 (RT−DA)</th><th>우리 원가</th><th>vs 항상 RT</th><th>${VOLUME_MW}MW 금액</th><th>결과</th></tr></thead>
+    <tbody>${scored.slice().reverse().map(r => { const b = bought(r); const dec = decision(r); return `<tr class="${r.big ? 'big' : ''}">
+      <td class="num">${mdw(r.date)}${r.big ? ' <span class="pill neutral" style="padding:1px 7px;font-size:11px">큰 날</span>' : ''}</td>
+      <td class="l"><span class="mk ${b}"></span>${esc(dec.label)}</td>
+      <td class="num">${usd2(r.da)}</td><td class="num">${usd2(r.rt)}</td>
+      <td class="num">${signed(r.dart)} <span style="color:var(--muted)">${r.dart > 0 ? 'DA 쌈' : 'RT 쌈'}</span></td>
+      <td class="num">${usd2(r.blended)}</td>
+      <td class="num ${r.vsRT < 0 ? 'neg' : r.vsRT > 0 ? 'pos' : ''}">${signed(r.vsRT)}</td>
+      <td class="num ${r.usd < 0 ? 'neg' : r.usd > 0 ? 'pos' : ''}">${r.usd === 0 ? '$0' : (r.usd < 0 ? '−' + usd(-r.usd) : '+' + usd(r.usd))}</td>
+      <td><span class="pill ${r.hit ? 'good' : 'bad'}">${r.hit ? '맞음' : '틀림'}</span></td></tr>`; }).join('')}</tbody>
+    <tfoot><tr><td class="l" colspan="2">평균 / 합계 (${n}일)</td><td class="num">${usd2(cDA)}</td><td class="num">${usd2(cRT)}</td><td class="num">${signed(cRT - cDA)}</td><td class="num">${usd2(cB)}</td><td class="num">${signed(cB - cRT)}</td><td class="num">${totUSD === 0 ? '$0' : (totUSD < 0 ? '−' + usd(-totUSD) : '+' + usd(totUSD))}</td><td>${hits}/${n}</td></tr></tfoot>
+  </table>` : '';
+
+  // ---- 월별 누적 (전체)
+  const months = new Map();
+  scoredAll.forEach(r => { const k = r.date.slice(0, 7); if (!months.has(k)) months.set(k, []); months.get(k).push(r); });
+  $('#monthly').innerHTML = months.size ? `<table>
+    <thead><tr><th class="l">월</th><th>채점일</th><th>DA 매수일</th><th>우리 원가</th><th>항상 RT</th><th>항상 DA</th><th>vs RT ($/MWh)</th><th>${VOLUME_MW}MW 금액</th><th>큰 날 적중</th></tr></thead>
+    <tbody>${[...months.keys()].sort().reverse().map(k => { const a = months.get(k); const b = a.filter(r => r.big); const u = a.reduce((s, r) => s + r.usd, 0); const vs = mean(a.map(r => r.vsRT)); return `<tr>
+      <td class="num">${k.replace('-', '.')}</td><td class="num">${a.length}</td><td class="num">${a.filter(r => r.daf > 0.5).length}</td>
+      <td class="num">${usd2(mean(a.map(r => r.blended)))}</td><td class="num">${usd2(mean(a.map(r => r.rt)))}</td><td class="num">${usd2(mean(a.map(r => r.da)))}</td>
+      <td class="num ${vs < 0 ? 'neg' : vs > 0 ? 'pos' : ''}">${signed(vs)}</td>
+      <td class="num ${u < 0 ? 'neg' : u > 0 ? 'pos' : ''}">${u === 0 ? '$0' : (u < 0 ? '−' + usd(-u) : '+' + usd(u))}</td>
+      <td class="num">${b.length ? `${b.filter(r => r.hit).length}/${b.length}` : '—'}</td></tr>`; }).join('')}</tbody>
+    <tfoot><tr><td class="l">전체</td><td class="num">${scoredAll.length}</td><td class="num">${scoredAll.filter(r => r.daf > 0.5).length}</td>
+      <td class="num">${usd2(mean(scoredAll.map(r => r.blended)))}</td><td class="num">${usd2(mean(scoredAll.map(r => r.rt)))}</td><td class="num">${usd2(mean(scoredAll.map(r => r.da)))}</td>
+      <td class="num">${signed(mean(scoredAll.map(r => r.vsRT)))}</td><td class="num">${(() => { const u = scoredAll.reduce((s, r) => s + r.usd, 0); return u === 0 ? '$0' : (u < 0 ? '−' + usd(-u) : '+' + usd(u)); })()}</td>
+      <td class="num">${(() => { const b = scoredAll.filter(r => r.big); return b.length ? `${b.filter(r => r.hit).length}/${b.length}` : '—'; })()}</td></tr></tfoot>
+  </table>` : '<div style="padding:16px;color:var(--muted)">채점된 달이 없습니다.</div>';
+
+  // ---- 흔들림 매트릭스 (기간 필터 적용, 최신이 위)
+  const dates = [...new Set(preds.map(r => r.date))].filter(d => !since || d >= since).sort().reverse();
+  const runOf = d => { const r = byKey.get(d + '|1'); return r ? r.run : null; };
+  $('#matrix').innerHTML = dates.length ? `<table><thead><tr><th class="l">대상일</th><th>D+4</th><th>D+3</th><th>D+2</th><th>D+1 (실제 매수)</th><th>실제로 싼 쪽</th></tr></thead><tbody>${dates.map(d => {
+    const cells = [4, 3, 2, 1].map(h => { const r = byKey.get(d + '|' + h); if (!r || r.m1 == null) return '<td><span class="cell empty">·</span></td>'; const k = decision(r).kind; const s = scoredMap.get(d); const chk = (h === 1 && s) ? `<span class="chk ${s.hit ? 'y' : 'n'}">${s.hit ? '✓' : '✗'}</span>` : ''; return `<td><span class="cell ${k === 'da' ? 'da' : k === 'mix' ? 'mix' : ''}" title="${esc(decision(r).label)}">${r.m1.toFixed(2)}</span>${chk}</td>`; });
+    const s = scoredMap.get(d);
+    const act = s ? `<span class="cell ${s.dart > 0 ? 'actual-da' : 'actual-rt'}">${s.dart > 0 ? 'DA' : 'RT'} ${signed(s.dart, 1)}</span>` : (d < today ? '<span class="cell pending">정산 대기</span>' : '<span class="cell empty">·</span>');
+    const ro = runOf(d);
+    return `<tr class="${cur.some(r => r.date === d) ? 'sel' : ''}" ${ro ? `style="cursor:pointer" onclick="selectRun('${ro}')"` : ''}><td class="l num">${ymd(d)} ${WD[new Date(dUTC(d)).getUTCDay()]}</td>${cells.join('')}<td>${act}</td></tr>`; }).join('')}</tbody></table>`
+    : '<div style="padding:16px;color:var(--muted)">이 기간에는 예측 기록이 없습니다.</div>';
+
+  // ---- 주간 리뷰
+  if (lookback.length) {
+    const lb = lookback[lookback.length - 1];
+    const hr = num(lb.hit_rate_big20), nb = num(lb.n_big20), vr = num(lb.vs_rt_big20), al = str(lb.alert);
+    $('#lookback').innerHTML = `<div class="tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+      ${tile('큰 날 적중률', hr != null ? `${hr}<small>%</small>` : '미판정', nb != null ? `표본 ${nb}일${nb < MIN_BIG_N ? ' — 표본 부족' : ''}` : '', hr != null && nb >= MIN_BIG_N ? (hr >= 50 ? 'good' : 'bad') : '')}
+      ${tile('큰 날 원가 vs RT', vr != null ? `${signed(vr)}<small>/MWh</small>` : '—', '음수면 큰 날에 RT 보다 쌌음', vr != null ? (vr < 0 ? 'good' : 'bad') : '')}
+      ${tile('전체 기간', `${num(lb.window_all_days) ?? '—'}<small>일</small>`, `원가 ${usd2(num(lb.cost_blended))} vs RT ${usd2(num(lb.cost_all_rt))}`)}
+      ${tile('경보', al ? '있음' : '없음', al || '정상', al ? 'bad' : 'good')}
+    </div>${str(lb.commentary) ? `<p style="margin:14px 0 0;color:var(--ink-2);max-width:78ch">${esc(lb.commentary)}</p>` : ''}
+    ${lookback.length > 1 ? `<div class="tbl-wrap" style="margin-top:14px;max-height:300px"><table><thead><tr><th class="l">기록</th><th>기간(일)</th><th>큰 날 적중률</th><th>큰 날 표본</th><th>큰 날 vs RT</th><th>원가</th><th>항상 RT</th><th class="l">경보</th></tr></thead><tbody>${lookback.slice().reverse().map(x => `<tr><td class="num">${esc(str(x.logged_at).slice(0, 10))}</td><td class="num">${num(x.window_all_days) ?? '—'}</td><td class="num">${num(x.hit_rate_big20) != null ? num(x.hit_rate_big20) + '%' : '—'}</td><td class="num">${num(x.n_big20) ?? '—'}</td><td class="num">${signed(num(x.vs_rt_big20))}</td><td class="num">${usd2(num(x.cost_blended))}</td><td class="num">${usd2(num(x.cost_all_rt))}</td><td class="l">${esc(str(x.alert)) || '—'}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">최근 기록 ${esc(str(lb.logged_at))} · 총 ${lookback.length}회</div>`;
+  } else {
+    const bigAll = scoredAll.filter(r => r.big);
+    $('#lookback').innerHTML = `<div class="empty">아직 주간 리뷰 기록이 없습니다. 채점된 날이 충분히 쌓이면 월요일 자동으로 첫 행이 기록됩니다. 그때까지는 위 "큰 날 적중" 칸이 같은 역할을 합니다 (현재 큰 날 ${bigAll.length}일 · 판정에는 ${MIN_BIG_N}일 필요).</div>`;
+  }
+
+  // ---- 점검 (항상 최신 실행 기준)
+  const checks = [];
+  if (latest.length) {
+    const d1 = latest.find(r => r.hn === 1);
+    const t1 = (d1 || latest[0]).date, d0 = latest[0].d0;
+    const gap = d0 ? dayDiff(t1, d0) : null;
+    if (gap == null) checks.push(['warn', '학습 데이터 기준일', '기록이 비어 있음']);
+    else if (gap > 14) checks.push(['critical', `학습 데이터가 ${gap}일 낡음 (기준일 ${d0})`, `모델이 "최근 시장" 이라고 믿는 값이 ${md(d0)} 것입니다. 정상은 2~3일. 시트 연동(sheets_source)이 실제 서버에서 동작하는지, 서비스 계정 키가 서버 환경변수에 있는지 확인하세요.`]);
+    else if (gap > 4) checks.push(['warn', `학습 데이터 ${gap}일 낡음 (기준일 ${d0})`, '정상은 2~3일. 데이터 갱신이 며칠 밀렸습니다.']);
+    else checks.push(['ok', `학습 데이터 기준일 ${d0} (예측일과 ${gap}일 차이)`, '정상 범위']);
+
+    if (genLatest) {
+      const h = hourCT(genLatest), genDayCT = dateTZ(genLatest, 'America/Chicago');
+      const late = d1 && dayDiff(d1.date, genDayCT) <= 1 && h >= BID_DEADLINE_CT;
+      if (late) checks.push(['critical', `D+1 예측이 DA 입찰 마감(${BID_DEADLINE_CT}:00 중부) 뒤인 ${fmtTZ(genLatest, 'America/Chicago', false)} 중부에 나옴`, `내일(${md(d1.date)}) 물량은 이미 마감된 뒤라 실제로 쓸 수 없습니다. 자동화(n8n) 스케줄의 시간대 설정을 확인하세요 — 설계는 07:40 중부입니다.`]);
+      else checks.push(['ok', `예측 시각 ${fmtTZ(genLatest, 'America/Chicago', false)} 중부 — 입찰 마감 전`, '정상']);
+      const ageH = (now - genLatest) / 36e5;
+      if (ageH > 36) checks.push(['warn', `마지막 예측이 ${Math.floor(ageH / 24)}일 전`, '매일 실행돼야 합니다. 자동화가 멈췄는지 확인하세요.']);
+      else if (d1 && d1.date < today) checks.push(['warn', '오늘 예측이 아직 없음', `마지막 D+1 대상일이 ${md(d1.date)} 입니다. 오늘 실행이 아직 안 돌았거나 실패했습니다.`]);
+    }
+    const d1All = latestByDateHorizon(preds).filter(r => r.hn === 1).sort((a, b) => a.date < b.date ? -1 : 1);
+    const pending = d1All.filter(r => r.da == null && dayDiff(today, r.date) >= 2);
+    if (pending.length) checks.push(['warn', `정산 실적 미기록 ${pending.length}일`, pending.map(r => md(r.date)).join(', ') + ' — 실적 채우기(backfill) 자동화가 이틀 넘게 빠졌습니다. 정산 소스를 확인하세요.']);
+    else checks.push(['ok', '정산 실적 채우기 정상', d1All.filter(r => r.da == null).length ? `대기 중: ${d1All.filter(r => r.da == null).map(r => md(r.date)).join(', ')} (아직 정산 전)` : '밀린 날 없음']);
+    if (d1All.length > 1) {
+      const missing = []; for (let d = addDays(d1All[0].date, 1); d < d1All[d1All.length - 1].date; d = addDays(d, 1)) if (!d1All.find(r => r.date === d)) missing.push(d);
+      if (missing.length) checks.push(['info', `예측이 빠진 날 ${missing.length}일`, (missing.length > 12 ? missing.slice(0, 12).map(md).join(', ') + ' …' : missing.map(md).join(', ')) + ' — 그 날은 결정 기록이 없어 채점에서 빠집니다.']);
+    }
+    const dupKeys = new Map(); preds.forEach(r => { const k = r.date + '|' + r.hn; dupKeys.set(k, (dupKeys.get(k) || 0) + 1); });
+    const dup = [...dupKeys].filter(([, c]) => c > 1).map(([k]) => k);
+    if (dup.length) checks.push(['info', `같은 날·같은 지평이 두 번 이상 산출된 경우 ${dup.length}건`, '이 화면은 마지막 실행만 씁니다. (예: ' + dup.slice(0, 3).map(k => { const [d, h] = k.split('|'); return `${md(d)} D+${h}`; }).join(', ') + ')']);
+    const modes = [...new Set(preds.map(r => r.mode).filter(Boolean))];
+    if (modes.length > 1) checks.push(['warn', `배분 규칙이 섞여 있음: ${modes.join(', ')}`, '규칙이 다른 행을 함께 평균하면 성과가 왜곡됩니다.']);
+    else checks.push(['ok', `배분 규칙 ${modes[0] || '—'} 로 일관`, '']);
+    const mixNoOverlay = latest.filter(r => decision(r).kind === 'mix' && !r.overlay);
+    if (mixNoOverlay.length) checks.push(['warn', '이상기온 표시 없이 중간 배분이 나온 날 있음', mixNoOverlay.map(r => md(r.date)).join(', ') + ' — 서버 ALLOC_MODE 가 ensemble 로 바뀌었는지 확인하세요.']);
+  } else checks.push(['critical', '예측 기록 없음', 'predictions 탭이 비어 있습니다.']);
+  if (!lookback.length) checks.push(['info', '주간 리뷰 미기록', '표본이 충분해지면 월요일 자동 기록됩니다.']);
+  if (meta.source === 'snapshot') checks.push(['warn', '시트 실시간 연결 안 됨 — 저장된 스냅샷을 보는 중', '이 화면의 숫자는 ' + (meta.at || '') + ' 기준입니다. 새로고침으로 다시 시도하거나, 게시 페이지라면 Google Drive 연결을 허용하세요.']);
+
+  const sevName = { critical: '중요', warn: '주의', ok: '정상', info: '참고' };
+  const box = c => `<div class="alert ${c[0]}"><span class="sev">${sevName[c[0]]}</span><div><b>${esc(c[1])}</b>${c[2] ? `<div class="why">${esc(c[2])}</div>` : ''}</div></div>`;
+  $('#checks').innerHTML = checks.map(box).join('');
+  $('#alerts').innerHTML = checks.filter(c => c[0] === 'critical' || c[0] === 'warn').map(box).join('');
+
+  $('#footer').innerHTML = `자료: Google Sheets <span class="num">predictions · analysis · lookback</span> 탭 · 예측 실행 ${runs.length}회 · 금액은 ${VOLUME_MW} MW × 24시간 기준 · 시각은 한국시간, 괄호는 미국 중부시간 · 이 화면은 참고용이며 자동 생성된 해설은 검증되지 않았습니다.`;
+}
+function tile(k, v, d, cls = '') { return `<div class="tile ${cls}"><div class="k">${k}</div><div class="v num">${v}</div><div class="d">${d || ''}</div></div>`; }
+
+/* ---------- 덤벨 차트: 날짜별 DA·RT 가격과 우리가 산 쪽 ---------- */
+function renderChart(rows) {
+  const host = $('#chart'), tip = $('#tip');
+  if (!rows.length) { host.innerHTML = '<div style="color:var(--muted);padding:20px 0">정산된 날이 생기면 여기에 가격 대조가 그려집니다.</div>'; return; }
+  const per = Math.max(22, Math.min(64, Math.floor(940 / rows.length)));
+  const W = Math.max(560, rows.length * per + 80), H = 260, L = 52, R = 16, T = 18, B = 34;
+  const vals = rows.flatMap(r => [r.da, r.rt]);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.15 || 5; lo = Math.max(0, Math.floor((lo - pad) / 10) * 10); hi = Math.ceil((hi + pad) / 10) * 10;
+  const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const x = i => L + (W - L - R) * (i + 0.5) / rows.length;
+  const step = (hi - lo) <= 60 ? 10 : (hi - lo) <= 150 ? 25 : (hi - lo) <= 400 ? 50 : 100;
+  const labelEvery = Math.ceil(40 / per);
+  let g = '';
+  for (let v = lo; v <= hi; v += step) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">$${v}</text>`;
+  g += `<line class="axis" x1="${L}" x2="${W - R}" y1="${y(lo)}" y2="${y(lo)}"/>`;
+  const rad = per >= 40 ? 1 : 0.75;
+  rows.forEach((r, i) => {
+    const cx = x(i), b = bought(r);
+    g += `<line class="stem${r.big ? ' big' : ''}" x1="${cx}" x2="${cx}" y1="${y(r.da)}" y2="${y(r.rt)}"/>`;
+    [['da', r.da], ['rt', r.rt]].forEach(([k, v]) => {
+      const mine = b === k;
+      g += mine
+        ? `<circle cx="${cx}" cy="${y(v)}" r="${6.5 * rad}" fill="var(--${k})" stroke="var(--surface)" stroke-width="2"/><circle cx="${cx}" cy="${y(v)}" r="${8.5 * rad}" fill="none" stroke="var(--ink)" stroke-width="1.5"/>`
+        : `<circle cx="${cx}" cy="${y(v)}" r="${4.5 * rad}" fill="var(--surface)" stroke="var(--${k})" stroke-width="2"/>`;
+    });
+    if (r.big) { const top = Math.min(y(r.da), y(r.rt)); g += `<text class="dl" x="${cx}" y="${top - 12}" text-anchor="middle">${signed(r.dart, 0)}</text>`; }
+    if (i % labelEvery === 0 || i === rows.length - 1) g += `<text class="tick" x="${cx}" y="${H - 12}" text-anchor="middle">${md(r.date)}</text>`;
+    g += `<rect class="hit-area" data-i="${i}" x="${cx - per / 2}" y="${T}" width="${per}" height="${H - T - B}"/>`;
+  });
+  host.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;min-width:${W}px" role="img" aria-label="정산일별 DA·RT 가격과 우리가 산 시장">${g}</svg>`;
+  const svg = host.querySelector('svg');
+  svg.addEventListener('mousemove', e => {
+    const a = e.target.closest('.hit-area'); if (!a) { tip.style.display = 'none'; return; }
+    const r = rows[+a.dataset.i]; const b = bought(r);
+    tip.innerHTML = `<b>${mdw(r.date)}</b>${r.big ? ' · 큰 날' : ''}<div class="row"><span>DA</span><span class="num">${usd2(r.da)}</span></div><div class="row"><span>RT</span><span class="num">${usd2(r.rt)}</span></div><div class="row"><span>차이 RT−DA</span><span class="num">${signed(r.dart)}</span></div><div class="row"><span>우리 선택</span><span>${b === 'da' ? 'DA' : 'RT'} ${Math.round((b === 'da' ? r.daf : 1 - r.daf) * 100)}%</span></div><div class="row"><span>결과</span><span>${r.hit ? '맞음' : '틀림'} · ${money(r.usd)}</span></div><div class="row"><span>DA 였다면</span><span>${r.daWould < 0 ? usd(-r.daWould) + ' 절약' : usd(r.daWould) + ' 손해'}</span></div>`;
+    tip.style.display = 'block';
+    const wrap = $('#chart-wrap').getBoundingClientRect();
+    let lx = e.clientX - wrap.left + 14, ly = e.clientY - wrap.top + 14;
+    if (lx + 270 > wrap.width) lx = e.clientX - wrap.left - 280;
+    tip.style.left = lx + 'px'; tip.style.top = ly + 'px';
+  });
+  svg.addEventListener('mouseleave', () => tip.style.display = 'none');
+}
+
+/* =========================================================
+   시작: 직접 읽기 → Google Drive 연결 → 스냅샷
+   ========================================================= */
+function showError(e) {
+  $('#status').innerHTML = '<span class="pill err"><span class="dot"></span>시트를 읽지 못함</span>';
+  const box = $('#error'); box.classList.remove('hidden');
+  box.innerHTML = `<b>구글 시트를 읽지 못했습니다.</b><div style="margin-top:6px">원인: <code>${esc(e.message)}</code></div><div style="margin-top:8px">확인할 것: ① 시트 공유가 "링크가 있는 모든 사용자 · 뷰어" 인지 ② 인터넷 연결 ③ 탭 이름이 predictions / analysis / lookback 인지. <a href="${SHEET_URL}" target="_blank" rel="noopener">시트 열기</a></div>`;
+  ['sec-today', 'sec-score', 'sec-matrix', 'sec-lookback', 'sec-checks'].forEach(id => $('#' + id).classList.add('hidden'));
+}
+(async function main() {
+  const errs = [];
+  try { setData(await loadJsonp(), { source: 'jsonp', at: new Date() }); setInterval(async () => { try { setData(await loadJsonp(), { source: 'jsonp', at: new Date() }); } catch (e) {} }, REFRESH_MS); return; }
+  catch (e) { errs.push(e.message); }
+  try { const r = await loadDrive(u => setData(u.data, { source: 'drive', at: u.at })); setData(r.data, { source: 'drive', at: r.at }); return; }
+  catch (e) { errs.push(e.message); }
+  if (window.__SNAPSHOT__) { setData(window.__SNAPSHOT__, { source: 'snapshot', at: window.__SNAPSHOT__.fetched_at }); return; }
+  showError(new Error(errs.join(' / ')));
+})();
+</script>
+</body>
+</html>
