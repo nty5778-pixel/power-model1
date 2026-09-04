@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """워크플로 JSON 을 n8n 에 밀어넣는다 — 매번 손으로 import 하지 않기 위해.
 
-    python push_n8n.py              두 워크플로를 n8n 에 반영
-    python push_n8n.py --dry-run    뭐가 바뀌는지만 보고 아무것도 안 함
-    python push_n8n.py --pull       반대 방향. n8n 에 있는 걸 로컬 파일로 가져온다
-    python push_n8n.py --only 1     1번 워크플로만
+    python push_n8n.py                 두 워크플로를 n8n 에 반영
+    python push_n8n.py --dry-run       뭐가 바뀌는지만 보고 아무것도 안 함
+    python push_n8n.py --pull          반대 방향. n8n 에 있는 걸 로컬 파일로 가져온다
+    python push_n8n.py --only 1        1번 워크플로만
+    python push_n8n.py --init-secrets  설정 파일에 비밀값 빈칸 만들기 (한 번만)
 
 왜 단순 업로드가 아닌가
 -----------------------
@@ -15,6 +16,12 @@ n8n 화면에서 손으로 넣은 것들(ERCOT 비밀번호, API 키 3개, Googl
 이 스크립트는 밀어넣기 전에 n8n 에서 현재 값을 먼저 읽어와, 그 자리에 도로 채운다.
 즉 **비밀값은 계속 n8n 에만 있고, 로직만 깃에서 온다.**
 하나라도 못 채우면 아예 밀어넣지 않고 멈춘다(--force 로 무시 가능).
+
+비밀값을 화면에서 일일이 넣기 번거로우면 `--init-secrets` 로 설정 파일에 빈칸을
+만들고 한 번만 채워 둔다. 그러면 새로 만드는 워크플로도 자동으로 채워진다.
+채우는 순서는 **n8n 이 먼저, 설정 파일이 나중** 이다 — 화면에서 바꾼 값을
+설정 파일의 옛 값이 덮어쓰는 일이 없도록.
+설정 파일은 .gitignore 에 있고, 진짜 값이 레포 JSON 에 섞이면 실행 자체가 멈춘다.
 
 준비 (한 번만)
 -------------
@@ -33,6 +40,7 @@ import copy
 import io
 import json
 import os
+import re
 import ssl
 import sys
 import urllib.error
@@ -40,7 +48,12 @@ import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONF = os.path.join(HERE, "n8n_push.local.json")
+
+# 설정 파일 경로. --conf 로 바꿀 수 있다.
+# 시험용 스크립트가 진짜 설정을 건드리지 못하게 하려고 뺐다 — 실제로 테스트가
+# 이 파일을 지워서 n8n API 키를 날린 적이 있다(키는 발급 시 한 번만 보여준다).
+DEFAULT_CONF = os.path.join(HERE, "n8n_push.local.json")
+CONF = DEFAULT_CONF
 FILES = ["n8n_1_daily_predict.json", "n8n_2_backfill_lookback.json"]
 
 # n8n 이 PUT 본문에서 받아주는 키. 이것 말고 뭐라도 더 있으면 400 이 난다
@@ -277,13 +290,20 @@ def _keep_ui_cache(local_params, remote_params):
             lc[k] = copy.deepcopy(rc[k])
 
 
-def carry_over_secrets(local_wf, remote_wf):
-    """로컬의 CHANGE-ME 자리에 n8n 의 현재 값을 도로 채운다.
+def carry_over_secrets(local_wf, remote_wf, secrets=None):
+    """로컬의 CHANGE-ME 자리를 실제 값으로 채운다.
 
-    반환: (채운 개수, 못 채운 목록). 노드 이름이 같은 것끼리 같은 위치를 본다.
+    찾는 순서:
+      1) n8n 에 이미 들어 있는 값 — 화면에서 손으로 넣은 것을 그대로 지킨다
+      2) 설정 파일의 secrets — 새 워크플로처럼 n8n 쪽에 아직 없을 때
+    둘 다 없으면 못 채운 자리로 보고한다.
+
+    반환: (n8n 에서 가져온 수, 설정에서 채운 수, 못 채운 목록)
     """
+    secrets = secrets or {}
     rnodes = {n["name"]: n for n in (remote_wf.get("nodes") or [])}
-    filled, missing = 0, []
+    from_n8n = from_conf = 0
+    missing = []
     for node in local_wf["nodes"]:
         rn = rnodes.get(node["name"])
 
@@ -299,10 +319,82 @@ def carry_over_secrets(local_wf, remote_wf):
             cur = _get(rn.get("parameters", {}), path) if rn else None
             if isinstance(cur, str) and cur.strip() and PLACEHOLDER not in cur:
                 _set(params, path, cur)
-                filled += 1
+                from_n8n += 1
+                continue
+
+            # n8n 에 없으면 설정 파일에서 채운다. 자리표시자 이름이 곧 열쇠다.
+            raw = _get(params, path)
+            filled_val, hit = raw, False
+            for token, val in secrets.items():
+                if val and token in filled_val:
+                    filled_val = filled_val.replace(token, val)
+                    hit = True
+            if hit and PLACEHOLDER not in filled_val:
+                _set(params, path, filled_val)
+                from_conf += 1
             else:
                 missing.append(here)
-    return filled, missing
+    return from_n8n, from_conf, missing
+
+
+def placeholder_tokens():
+    """워크플로 파일들에 실제로 쓰인 CHANGE-ME-... 이름을 모은다."""
+    found = set()
+    for f in FILES:
+        p = os.path.join(HERE, f)
+        if os.path.exists(p):
+            text = io.open(p, encoding="utf-8").read()
+            found |= set(re.findall(r"CHANGE-ME-[A-Z0-9-]+", text))
+    return sorted(found)
+
+
+def do_init_secrets():
+    """설정 파일에 비밀값 빈칸을 만들어 준다. 사람은 값만 채우면 된다."""
+    if not os.path.exists(CONF):
+        die("먼저 n8n_push.local.json 을 만들 것 (파일 맨 위 설명 참고).")
+    c = json.loads(io.open(CONF, encoding="utf-8").read().lstrip("﻿"))
+    cur = c.get("secrets") or {}
+    tokens = placeholder_tokens()
+    if not tokens:
+        die("워크플로 파일에서 CHANGE-ME 자리를 찾지 못했다.")
+    c["secrets"] = {t: cur.get(t, "") for t in tokens}
+    io.open(CONF, "w", encoding="utf-8", newline="\n").write(
+        json.dumps(c, ensure_ascii=False, indent=2) + "\n")
+
+    print(f"n8n_push.local.json 에 비밀값 칸 {len(tokens)}개를 만들었다.\n")
+    for t in tokens:
+        state = "이미 채워져 있음" if cur.get(t) else "비어 있음 ← 채울 것"
+        print(f"   {t:<26} {state}")
+    print("\n그 파일을 열어 따옴표 사이에 값을 넣으면 된다. 무엇을 넣나:")
+    print("   CHANGE-ME-ERCOT-PW        ERCOT 계정 비밀번호")
+    print("   CHANGE-ME-ERCOT-KEY       ERCOT 구독 키(Subscription Key)")
+    print("   CHANGE-ME-RENDER-API-KEY  Render 환경변수 API_KEY 에 넣은 값")
+    print("   CHANGE-ME-CLAUDE-API-KEY  Claude API 키")
+    print("\n이 파일은 .gitignore 에 있어 깃에 올라가지 않는다.")
+    print("채운 뒤 `python push_n8n.py --dry-run` 으로 확인할 것.")
+
+
+def check_repo_leak(secrets):
+    """깃에 올라가는 워크플로 파일에 실제 비밀값이 섞였는지 본다.
+
+    --pull 이나 손편집으로 진짜 값이 파일에 들어가면 그대로 커밋될 수 있다.
+    값 자체는 절대 찍지 않고, 어느 파일의 어느 이름인지만 알린다.
+    """
+    bad = []
+    for f in FILES:
+        p = os.path.join(HERE, f)
+        if not os.path.exists(p):
+            continue
+        text = io.open(p, encoding="utf-8").read()
+        for token, val in (secrets or {}).items():
+            if val and len(val) >= 8 and val in text:
+                bad.append((f, token))
+    if bad:
+        lines = "\n".join(f"      {f} 에 {t} 의 실제 값" for f, t in bad)
+        die("깃에 올라가는 워크플로 파일에 **진짜 비밀값**이 들어 있다.\n"
+            f"{lines}\n"
+            "    이 상태로 커밋하면 유출된다. 해당 자리를 자리표시자로 되돌릴 것\n"
+            "    (`git checkout -- <파일>` 또는 `python push_n8n.py --pull`).")
 
 
 # --------------------------------------------------------------------------
@@ -371,14 +463,23 @@ def do_push(conf, files, dry, force):
         else:
             print(f"   n8n 쪽 상태  : 없음 → '{local['name']}' 으로 새로 만든다")
 
-        filled, missing = carry_over_secrets(local, remote_full or {})
-        print(f"   비밀값       : {filled}개 이어받음", end="")
+        n8n_n, conf_n, missing = carry_over_secrets(
+            local, remote_full or {}, conf.get("secrets"))
+        parts = [f"n8n 에서 {n8n_n}개"]
+        if conf_n:
+            parts.append(f"설정 파일에서 {conf_n}개")
+        print(f"   비밀값       : {' · '.join(parts)}", end="")
         if missing:
             print(f" · {len(missing)}개 못 찾음")
             for m in missing:
                 print(f"                  ! {m}")
+            if not conf.get("secrets"):
+                print("                  → `python push_n8n.py --init-secrets` 로 "
+                      "설정 파일에 한 번만 채워두면 이후로 자동으로 들어간다")
             if not remote_full:
-                print("                  (새 워크플로라 당연하다 — 만든 뒤 화면에서 채울 것)")
+                # 새로 만드는 것이라 덮어쓸 값 자체가 없다. 막지 않는다.
+                print("                  (새 워크플로라 그럴 수 있다 — "
+                      "만든 뒤 화면에서 채우거나 위 방법을 쓸 것)")
             elif force:
                 print("                  (--force 라 그대로 올린다)")
             else:
@@ -412,8 +513,10 @@ def do_push(conf, files, dry, force):
         else:
             new = api(conf, "POST", "/workflows", body)
             wid = new.get("id")
+            todo = ("화면에서 비밀값을 채우고 "
+                    if PLACEHOLDER in json.dumps(body, ensure_ascii=False) else "")
             print(f"   ✓ {fname} 새로 만들었다 (id {wid}). "
-                  f"화면에서 비밀값을 채우고 자동실행을 켤 것")
+                  f"{todo}Google Sheets 연결을 붙인 뒤 자동실행을 켤 것")
         if (conf.get("workflows") or {}).get(fname) != wid:
             remember_id(fname, wid)
     print()
@@ -464,10 +567,24 @@ def main():
     ap.add_argument("--only", choices=["1", "2"], help="1번 또는 2번 워크플로만")
     ap.add_argument("--force", action="store_true",
                     help="비밀값을 못 찾아도 그냥 올린다 (워크플로가 멈출 수 있다)")
+    ap.add_argument("--init-secrets", action="store_true",
+                    help="설정 파일에 비밀값 빈칸을 만든다 (한 번만 채우면 이후 자동)")
+    ap.add_argument("--conf", metavar="경로",
+                    help="설정 파일 경로 (기본: n8n_push.local.json). 시험용")
     a = ap.parse_args()
+
+    if a.conf:
+        global CONF
+        CONF = os.path.abspath(a.conf)
+
+    if a.init_secrets:
+        do_init_secrets()
+        return
 
     files = FILES if not a.only else [FILES[int(a.only) - 1]]
     conf = load_conf()
+    # 깃에 올라가는 파일에 진짜 값이 섞였으면 여기서 멈춘다
+    check_repo_leak(conf.get("secrets"))
     print(f"\n대상: {conf['base_url']}\n")
     if a.pull:
         do_pull(conf, files)
