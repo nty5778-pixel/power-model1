@@ -380,6 +380,66 @@
              바꾸시려면 반드시 백테스트로 먼저 확인하세요.</p>
         </div>
 
+        <div class="note">
+          <h3>데이터를 최신으로 유지하기 — 구글 시트 연결 <b>(권장)</b></h3>
+          <p>저장소에 올려둔 과거 데이터는 <b>2026년 6월 24일</b>에서 멈춰 있습니다.
+             그대로 두면 모델이 넉 달 전 시장을 보고 판단합니다.
+             이미 매일 갱신되고 있는 <b>구글 시트를 서버에 연결</b>해 두면
+             손대지 않아도 학습 데이터가 계속 최신으로 유지됩니다.</p>
+          <p style="margin-top:.35rem">기존 파일을 버리는 게 아닙니다. <b>2024~2025년은 그대로 파일이 담당하고,
+             2026년 1월 1일부터는 시트가 덮어씁니다.</b> 시트를 못 읽어도 서버는 그냥 파일만 보고 계속 돕니다.</p>
+
+          <p style="margin-top:.6rem"><b>탭 하나마다 다음을 반복합니다.</b></p>
+          <ol>
+            <li>그 스프레드시트를 엽니다.</li>
+            <li><b>파일 → 공유 → 웹에 게시</b></li>
+            <li><b>링크</b> 탭에서 왼쪽 칸을 <b>“전체 문서”에서 게시할 탭 하나로</b> 바꾸고,
+                오른쪽 칸을 <b>“쉼표로 구분된 값(.csv)”</b> 으로 바꿉니다.</li>
+            <li><b>게시</b> → 경고창에서 <b>확인</b></li>
+            <li>나온 주소를 복사해 Render 환경변수에 넣습니다.</li>
+          </ol>
+
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>이름</th><th>어느 탭을 게시해서 넣나</th><th>안 넣으면</th></tr></thead>
+              <tbody>
+                <tr><td><code>SHEET_CSV_HIST</code></td><td>Energy Price Tracker DB → <b>Historical data</b></td>
+                    <td>시트 연결 자체가 꺼집니다</td></tr>
+                <tr><td><code>SHEET_CSV_DEMAND</code></td><td>같은 파일 → <b>demand</b></td>
+                    <td>부하 예보만 옛날 파일 값</td></tr>
+                <tr><td><code>SHEET_CSV_GAS</code></td><td>같은 파일 → <b>GD Katy</b></td>
+                    <td>가스만 옛날 파일 값</td></tr>
+                <tr><td><code>SHEET_CSV_WX</code></td><td>날씨 파일 → 실측 기온 탭</td>
+                    <td>기온만 옛날 파일 값</td></tr>
+                <tr><td><code>SHEET_CSV_WXNORM</code></td><td>날씨 파일 → 30년 평년값 탭</td>
+                    <td>평년값을 서버가 직접 계산 (덜 정확)</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin-top:.35rem"><b>다섯 개를 다 넣지 않아도 됩니다.</b> 넣은 것만 시트에서 읽고
+             나머지는 기존 파일을 씁니다.</p>
+
+          <p style="margin-top:.6rem"><b>연결됐는지 보는 법</b> — Render 화면의 <b>Logs</b>에서
+             다음 줄을 찾습니다. <b>끝 날짜가 어제</b>면 정상입니다.</p>
+          <div class="snippet">
+            <div class="snippet-bar"><span>Render Logs</span></div>
+            <pre>[sheets] 읽기 방식: 웹 게시 CSV (hist, demand, gas, wx, wxnorm)
+[sheets] ERCOT 5,832행 (2026-01-01 ~ 2026-09-03)</pre>
+          </div>
+          <p style="margin-top:.35rem">이 줄이 아예 없으면 시트가 안 붙은 것입니다.
+             주소를 잘못 붙여넣었거나 게시를 안 한 경우입니다.</p>
+        </div>
+
+        <div class="note warn">
+          <h3>게시할 때 “전체 문서”를 고르면 안 됩니다</h3>
+          <p>게시 화면의 기본값이 <b>전체 문서</b>입니다. 그대로 두시면 같은 파일에 들어 있는
+             <b>Criterion 리포트 탭까지 주소를 아는 사람 누구나 보게 됩니다.</b>
+             반드시 <b>탭 하나씩</b> 골라서 게시해 주세요.</p>
+          <p style="margin-top:.35rem">되돌리시려면 같은 화면(<b>파일 → 공유 → 웹에 게시</b>)에서
+             <b>게시 중지</b>를 누르시면 됩니다. 주소는 즉시 죽습니다.
+             Render 환경변수도 같이 지워 주세요.</p>
+        </div>
+
         <div class="success"><span class="tick">✓</span>
           <span><b>이렇게 되면 성공</b> — 브라우저에 <code>{"ok":true, ...}</code> 가 보인다.</span></div>
       </div>
@@ -576,11 +636,14 @@
            그 숫자는 <b>아무것도 안 하고 RT만 사는 쪽이 항상 더 높게</b> 나옵니다.
            $0.5 차이 나는 날과 $50 차이 나는 날을 똑같이 한 번으로 세기 때문입니다.</p>
       </div>
-      <div class="note warn">
-        <h3>학습 데이터는 저절로 갱신되지 않습니다</h3>
-        <p>지금 데이터는 <b>2026년 6월 24일</b>에서 멈춰 있습니다. 시간이 갈수록 모델이 낡은 시장을
-           보게 됩니다. <b>월 1회</b> 최신 CSV로 <code class="inline">data</code> 폴더를 갱신하고
-           GitHub에 올리면 서버가 알아서 새로 뜹니다.</p>
+      <div class="note">
+        <h3>학습 데이터는 시트가 알아서 채웁니다 — 다만 확인은 하세요</h3>
+        <p>3단계에서 구글 시트를 연결하셨다면 매일 자동으로 최신 데이터를 씁니다.
+           <b>연결하지 않으셨다면 데이터는 2026년 6월 24일에서 멈춰 있습니다.</b></p>
+        <p style="margin-top:.35rem">시트가 끊겨도 서버는 조용히 옛날 파일로 계속 돕니다.
+           그래서 <b>결과 시트의 <code class="inline">d0_gap_days</code> 칸</b>을 가끔 보세요.
+           이 숫자는 “학습 데이터가 며칠 전에서 멈췄나”입니다.
+           <b>평소 1~2, 5를 넘으면 시트 갱신이 멈춘 것</b>입니다.</p>
       </div>
       <div class="note">
         <h3>성적이 계절을 탑니다 — 하반기 부진을 곧바로 고장으로 읽지 마세요</h3>
