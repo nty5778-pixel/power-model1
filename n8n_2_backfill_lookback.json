@@ -387,7 +387,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://powermodel1.onrender.com/score",
+        "url": "https://power-model1-1.onrender.com/score",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
@@ -514,7 +514,7 @@
     },
     {
       "parameters": {
-        "url": "https://powermodel1.onrender.com/health",
+        "url": "https://power-model1-1.onrender.com/health",
         "options": {
           "timeout": 30000,
           "response": {

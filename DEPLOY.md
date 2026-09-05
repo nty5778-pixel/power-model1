@@ -260,7 +260,7 @@ import 전에 찾아 바꾸기 한 번으로 끝난다. 이유는 §4-1-1.
 
 | 값 | 들어간 내용 |
 |---|---|
-| Render 주소 | `https://powermodel1.onrender.com` |
+| Render 주소 | `https://power-model1-1.onrender.com` |
 | 시트 ID | `1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24` |
 | ERCOT 아이디 | `ty.noh@sk.com` |
 | 거래 규모 | `100` MW |

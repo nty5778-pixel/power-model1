@@ -13,7 +13,7 @@ Render 배포용 FastAPI 래퍼 — run_models_d1_d4_v4_weather.py 를 HTTP 로 
     Render 디스크는 ephemeral 이므로 런타임 생성 파일은 보존되지 않는다.
   * 학습 결과 캐시: 같은 날 두 번째 호출은 메모리 캐시 사용(콜드스타트 시 무효).
 """
-import os, sys, json, tempfile, datetime as dt
+import os, sys, json, math, re, tempfile, datetime as dt
 from typing import Optional, List, Dict, Any
 
 import pandas as pd
@@ -199,6 +199,82 @@ class ScoreRow(BaseModel):
     RT_actual: float
 
 
+def _no_urls(s):
+    """오류 메시지에 섞여 나오는 주소를 지운다.
+
+    웹 게시 CSV 주소는 그 자체가 열쇠라(주소를 아는 사람은 누구나 그 탭을 본다)
+    진단 응답에 그대로 실리면 안 된다.
+    """
+    return re.sub(r"https?://\S+", "<주소 생략>", str(s))
+
+
+@app.get("/diag")
+def diag(x_api_key: Optional[str] = Header(None)):
+    """구글 시트가 실제로 붙었는지 밖에서 확인하기 위한 진단.
+
+    시트 읽기는 실패해도 CSV 로 조용히 넘어가도록(서비스가 죽지 않게) 만들어 뒀는데,
+    그 때문에 '왜 안 붙었는지'를 Render 로그 없이는 알 수가 없었다. 여기서 답한다.
+    """
+    _auth(x_api_key)
+    env = {name: bool(os.environ.get(name, "").strip())
+           for name in sheets_source.URL_ENV.values()}
+    env["GOOGLE_SERVICE_ACCOUNT_JSON"] = bool(
+        os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip())
+
+    try:
+        read, mode = sheets_source.make_reader()
+    except Exception as e:
+        read, mode = None, f"읽기 준비 실패: {_no_urls(e)}"
+
+    tabs = {}
+    if read is not None:
+        for key, envname in sheets_source.URL_ENV.items():
+            if not os.environ.get(envname, "").strip() and mode.startswith("웹"):
+                tabs[key] = {"설정됨": False}
+                continue
+            try:
+                df = read(key)
+            except Exception as e:
+                tabs[key] = {"설정됨": True, "읽힘": False,
+                             "오류": _no_urls(e)[:200]}
+                continue
+            if df is None or not len(df):
+                tabs[key] = {"설정됨": True, "읽힘": False,
+                             "오류": "빈 표가 왔다 (게시 형식이 CSV 인지, 탭이 맞는지 확인)"}
+            else:
+                tabs[key] = {"설정됨": True, "읽힘": True, "행": int(len(df)),
+                             "컬럼앞부분": [str(c) for c in list(df.columns)[:8]]}
+
+    panel_last = None
+    if _cache.get("panel") is not None:
+        try:
+            panel_last = str(pd.to_datetime(_cache["panel"]["date"]).max().date())
+        except Exception:
+            pass
+
+    return {
+        "환경변수_설정여부": env,
+        "선택된_읽기방식": mode or "없음 (CSV 만 사용)",
+        "탭별_상태": tabs,
+        "학습데이터_마지막날": panel_last,
+        "안내": ("환경변수를 넣었는데 '선택된_읽기방식'이 '없음'이면 Render 가 아직 "
+                 "재배포되지 않았거나 이름이 다르다. 이름은 위 목록과 정확히 같아야 한다."),
+    }
+
+
+def _r(v, nd=3):
+    """숫자를 반올림하되 NaN/무한대는 None 으로 바꾼다.
+
+    JSON 은 NaN 을 표현할 수 없어서, 하나라도 섞이면 응답 전체가 500 으로 죽는다.
+    값이 없다는 뜻을 null 로 돌려주는 편이 낫다 — 시트에는 빈 칸으로 들어간다.
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(f, nd) if math.isfinite(f) else None
+
+
 @app.post("/score")
 def score(rows: List[ScoreRow], x_api_key: Optional[str] = Header(None)):
     """예측 배분 + 실적가격 → 실현원가/적중 지표. n8n look-back 워크플로가 호출."""
@@ -220,19 +296,21 @@ def score(rows: List[ScoreRow], x_api_key: Optional[str] = Header(None)):
     big20 = d[d.DART.abs() >= 20]
     return {
         "n_days": int(len(d)),
-        "cost_blended": round(float(d.blended.mean()), 3),
-        "cost_all_rt": round(float(d.RT_actual.mean()), 3),
-        "cost_all_da": round(float(d.DA_actual.mean()), 3),
-        "vs_rt": round(float(d.vs_rt.mean()), 3),
-        "vs_da": round(float(d.vs_da.mean()), 3),
-        "cost_std": round(float(d.blended.std()), 3),
-        "hit_rate_all": round(float(d.hit.mean() * 100), 1),
-        "hit_rate_big5": (round(float(big5.hit.mean() * 100), 1) if len(big5) >= 5 else None),
+        "cost_blended": _r(d.blended.mean()),
+        "cost_all_rt": _r(d.RT_actual.mean()),
+        "cost_all_da": _r(d.DA_actual.mean()),
+        "vs_rt": _r(d.vs_rt.mean()),
+        "vs_da": _r(d.vs_da.mean()),
+        # 표준편차는 행이 1개면 NaN 이다(ddof=1). NaN 은 JSON 으로 직렬화되지 않아
+        # 응답 전체가 500 으로 죽는다 — 실제로 1행짜리 호출에서 그렇게 터졌다.
+        "cost_std": _r(d.blended.std()),
+        "hit_rate_all": _r(d.hit.mean() * 100, 1),
+        "hit_rate_big5": (_r(big5.hit.mean() * 100, 1) if len(big5) >= 5 else None),
         "n_big5": int(len(big5)),
         # --- 핵심 감시 지표 ---
-        "hit_rate_big20": (round(float(big20.hit.mean() * 100), 1) if len(big20) >= 5 else None),
+        "hit_rate_big20": (_r(big20.hit.mean() * 100, 1) if len(big20) >= 5 else None),
         "n_big20": int(len(big20)),
-        "vs_rt_big20": (round(float(big20.vs_rt.mean()), 3) if len(big20) else None),
-        "mean_da_fraction": round(float(d.DA_fraction.mean()), 3),
-        "detail": d.round(3).to_dict("records"),
+        "vs_rt_big20": (_r(big20.vs_rt.mean()) if len(big20) else None),
+        "mean_da_fraction": _r(d.DA_fraction.mean()),
+        "detail": json.loads(d.round(3).to_json(orient="records")),
     }
