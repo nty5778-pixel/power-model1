@@ -291,6 +291,36 @@ def diag(x_api_key: Optional[str] = Header(None)):
             info["첫줄앞부분"] = first[:120]
         probe[key] = info
 
+    # 탭이 읽히더라도 컬럼 이름이 다르면 모델이 그 데이터를 통째로 버린다.
+    # (is_ercot_history 가 필요한 항목을 전부 갖춘 파일만 과거데이터로 인정한다.)
+    # 조용히 버려지면 밖에서는 'CSV 만 쓰네' 로만 보이므로 여기서 이유를 말한다.
+    ercot_check = None
+    try:
+        read2, _ = sheets_source.make_reader()
+        if read2 is not None:
+            e = sheets_source.fetch_ercot(read2)
+            if e is None or not len(e):
+                ercot_check = {"만들어짐": False,
+                               "설명": "시트에서 ERCOT 표를 못 만들었다 (탭/컬럼 확인)"}
+            else:
+                import tempfile as _tf
+                with _tf.TemporaryDirectory() as td:
+                    fp = os.path.join(td, "chk.csv")
+                    e.to_csv(fp, index=False)
+                    ok, miss = M.is_ercot_history(fp)
+                ts = pd.to_datetime(e["Timestamp"].astype(str).str.replace(
+                    r"[+-]\d{2}:\d{2}$", "", regex=True), errors="coerce").dropna()
+                ercot_check = {
+                    "만들어짐": True, "행": int(len(e)),
+                    "날짜범위": [str(ts.min()), str(ts.max())] if len(ts) else None,
+                    "모델이_인정": bool(ok),
+                    "빠진항목": list(miss),
+                    "설명": ("정상 — 이 데이터가 학습에 쓰인다" if ok else
+                             "이 항목들이 없어서 통째로 무시된다. hist 탭이 맞는 탭인지 확인할 것"),
+                }
+    except Exception as e:
+        ercot_check = {"확인실패": _no_urls(e)[:200]}
+
     panel_last = None
     if _cache.get("panel") is not None:
         try:
@@ -303,6 +333,7 @@ def diag(x_api_key: Optional[str] = Header(None)):
         "선택된_읽기방식": mode or "없음 (CSV 만 사용)",
         "탭별_상태": tabs,
         "주소_점검": probe,
+        "ERCOT_데이터_판정": ercot_check,
         "학습데이터_마지막날": panel_last,
         "안내": ("환경변수를 넣었는데 '선택된_읽기방식'이 '없음'이면 Render 가 아직 "
                  "재배포되지 않았거나 이름이 다르다. 이름은 위 목록과 정확히 같아야 한다."),
