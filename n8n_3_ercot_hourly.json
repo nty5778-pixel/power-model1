@@ -1,0 +1,646 @@
+{
+  "name": "ERCOT DART 3 - Hourly History Builder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "매시 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1120,
+        300
+      ],
+      "notes": "매시 1회. 지난 며칠 실적을 채우고, 앞날 예보를 미리 적어둔다."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ercotb2c.b2clogin.com/ercotb2c.onmicrosoft.com/B2C_1_PUBAPI-ROPC-FLOW/oauth2/v2.0/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "password"
+            },
+            {
+              "name": "username",
+              "value": "ty.noh@sk.com"
+            },
+            {
+              "name": "password",
+              "value": "CHANGE-ME-ERCOT-PW"
+            },
+            {
+              "name": "response_type",
+              "value": "id_token"
+            },
+            {
+              "name": "scope",
+              "value": "openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access"
+            },
+            {
+              "name": "client_id",
+              "value": "fec253ea-0d06-4272-a5e6-b478baeecd70"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "token",
+      "name": "ERCOT Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -920,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "id_token 을 받는다. 다른 노드들이 $('ERCOT Token') 으로 참조한다."
+    },
+    {
+      "parameters": {
+        "jsCode": "// 조회 범위. LOOKBACK_DAYS 만 늘리면 과거를 더 채운다(한 번에 채우고 되돌릴 것).\nconst LOOKBACK_DAYS = 3;\n\nconst now = new Date();\nconst iso = d => d.toISOString().slice(0, 10);\nconst back = new Date(now); back.setUTCDate(back.getUTCDate() - LOOKBACK_DAYS);\nconst fwd  = new Date(now); fwd.setUTCDate(fwd.getUTCDate() + 8);\n\n// 풍력/태양광/부하예보는 '발표분' 하나가 8~10일치를 담는다(실측 확인).\n// 그래서 최근 발표분만 받아도 지난 며칠 실적과 앞으로 8일 예보가 다 들어온다.\n//\n// 12시간을 되짚는 이유: ERCOT 의 postedDatetime 은 UTC 가 아니라 현지시각(중부시) 이다.\n// UTC 기준으로 3시간만 되짚었더니 최신 발표분보다 미래가 되어 0행이 왔다(실측).\n// 중부시는 UTC-5~-6 이므로 12시간이면 어느 계절이든 안전하게 덮는다.\n// 발표분 하나당 200행 남짓이라 12시간치를 받아도 5,000행 제한에 걸리지 않는다.\nconst posted = new Date(now.getTime() - 12 * 3600 * 1000).toISOString().slice(0, 19);\n\nreturn [{ json: {\n  dateFrom: iso(back),\n  dateToPast: iso(now),     // 가격·실적은 오늘까지만 있다\n  dateToFuture: iso(fwd),   // 예보는 앞날까지\n  postedFrom: posted,\n} }];\n"
+      },
+      "id": "range",
+      "name": "Date Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np4-190-cd/dam_stlmnt_pnt_prices",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range').first().json.dateToPast }}"
+            },
+            {
+              "name": "settlementPoint",
+              "value": "LZ_HOUSTON"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-dam-lz-houston",
+      "name": "ERCOT DAM (LZ_HOUSTON)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        100
+      ],
+      "notes": "전일시장 정산가. 시간별 24행/일.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np6-905-cd/spp_node_zone_hub",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range').first().json.dateToPast }}"
+            },
+            {
+              "name": "settlementPoint",
+              "value": "LZ_HOUSTON"
+            },
+            {
+              "name": "settlementPointType",
+              "value": "LZ"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-rt-lz-houston",
+      "name": "ERCOT RT (LZ_HOUSTON)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        240
+      ],
+      "notes": "실시간 15분 가격. settlementPointType 을 LZ 로 고정하지 않으면 LZEW 와 섞여 하루 192행이 온다.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np6-905-cd/spp_node_zone_hub",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range').first().json.dateToPast }}"
+            },
+            {
+              "name": "settlementPoint",
+              "value": "HB_BUSAVG"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-rt-hb-busavg",
+      "name": "ERCOT RT (HB_BUSAVG)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        380
+      ],
+      "notes": "허브 평균가. 휴스턴 프리미엄(RT_LZ - RT_HB) 계산에 쓴다.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np6-345-cd/act_sys_load_by_wzn",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "operatingDayFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "operatingDayTo",
+              "value": "={{ $('Date Range').first().json.dateToPast }}"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-actual-load",
+      "name": "ERCOT Actual Load",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        520
+      ],
+      "notes": "실적 부하. total 이 계통 전체.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np4-742-cd/wpp_hrly_actual_fcast_geo",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range').first().json.dateToFuture }}"
+            },
+            {
+              "name": "postedDatetimeFrom",
+              "value": "={{ $('Date Range').first().json.postedFrom }}"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-wind",
+      "name": "ERCOT Wind",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        180
+      ],
+      "notes": "실적(genSystemWide)과 예보(STWPFSystemWide)가 한 응답에 같이 온다.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np4-737-cd/spp_hrly_avrg_actl_fcast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range').first().json.dateToFuture }}"
+            },
+            {
+              "name": "postedDatetimeFrom",
+              "value": "={{ $('Date Range').first().json.postedFrom }}"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-solar",
+      "name": "ERCOT Solar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        320
+      ],
+      "notes": "실적(genSystemWide)과 예보(STPPFSystemWide).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np3-565-cd/lf_by_model_weather_zone",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $('Date Range').first().json.dateFrom }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $('Date Range').first().json.dateToFuture }}"
+            },
+            {
+              "name": "postedDatetimeFrom",
+              "value": "={{ $('Date Range').first().json.postedFrom }}"
+            },
+            {
+              "name": "inUseFlag",
+              "value": "true"
+            },
+            {
+              "name": "size",
+              "value": "5000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('ERCOT Token').first().json.id_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "CHANGE-ME-ERCOT-KEY"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ercot-load-forecast",
+      "name": "ERCOT Load Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        460
+      ],
+      "notes": "inUseFlag=true 가 없으면 쓰지 않는 모델까지 와서 하루 36,864행이 된다.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// ERCOT API 응답들을 시간별 한 줄로 합친다.\n// 시트 컬럼: Timestamp DAM RT_LZ RT_HB Load NetLoad Temp Solar Solar_f Wind Wind_f PRC\n//\n// 시각 규칙: ERCOT 의 hourEnding 은 '끝나는 시각' 이다(01:00 = 00~01시).\n//            학습데이터의 Timestamp 는 '시작 시각' 이라 1을 뺀다.\n// 예보 규칙: 예보 컬럼(Solar_f/Wind_f/부하예보)은 '아직 오지 않은 날' 에만 쓴다.\n//            그래야 그 날의 마지막 기록이 전일(D-1) 예보가 된다 — 학습데이터의\n//            'Prior Day (Rolling)' 과 같은 뜻이 된다. 지난 날짜를 덮어쓰면\n//            사후에 본 예보가 들어가 학습 때와 의미가 달라진다.\nconst rows = (name) => {\n  const j = $(name).first().json;\n  const f = (j.fields || []).map(x => x.name);\n  return (j.data || []).map(r => Object.fromEntries(f.map((k, i) => [k, r[i]])));\n};\nconst he = (v) => {           // \"01:00\" | \"1:00\" | 1 -> 1\n  if (v === null || v === undefined) return null;\n  const s = String(v);\n  return s.includes(':') ? parseInt(s.split(':')[0], 10) : parseInt(s, 10);\n};\nconst key = (date, hourEnding) => {           // 시작 시각으로 바꾼 키\n  const h = he(hourEnding);\n  if (h === null || isNaN(h)) return null;\n  const d = new Date(`${String(date).slice(0, 10)}T00:00:00Z`);\n  d.setUTCHours(h - 1);\n  return d.toISOString().slice(0, 13);        // \"YYYY-MM-DDTHH\"\n};\nconst out = new Map();\nconst put = (k, field, val) => {\n  if (k === null || val === null || val === undefined || val === '') return;\n  if (!out.has(k)) out.set(k, {});\n  out.get(k)[field] = val;\n};\n\n// --- 가격: DAM (시간별 그대로) ---\nfor (const r of rows('ERCOT DAM (LZ_HOUSTON)'))\n  put(key(r.deliveryDate, r.hourEnding), 'DAM', r.settlementPointPrice);\n\n// --- 가격: RT 15분 -> 시간 평균 ---\nconst avg = (name, field) => {\n  const acc = new Map();\n  for (const r of rows(name)) {\n    const k = key(r.deliveryDate, r.deliveryHour);   // deliveryHour 도 '끝나는 시각'\n    if (k === null) continue;\n    if (!acc.has(k)) acc.set(k, []);\n    acc.get(k).push(Number(r.settlementPointPrice));\n  }\n  for (const [k, v] of acc)\n    put(k, field, Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100) / 100);\n};\navg('ERCOT RT (LZ_HOUSTON)', 'RT_LZ');\navg('ERCOT RT (HB_BUSAVG)', 'RT_HB');\n\n// --- 실적 부하 ---\nfor (const r of rows('ERCOT Actual Load'))\n  put(key(r.operatingDay, r.hourEnding), 'Load', r.total);\n\n// --- 풍력/태양광: 같은 응답에 실적과 예보가 같이 온다 ---\n// 발표 시각이 여러 개 섞여 오므로 (배송일,시각)마다 '가장 늦게 발표된 것' 만 남긴다.\nconst today = new Date().toISOString().slice(0, 10);\nconst pickLatest = (name, actField, fcField, actCol, fcCol) => {\n  const best = new Map();\n  for (const r of rows(name)) {\n    const k = key(r.deliveryDate, r.hourEnding);\n    if (k === null) continue;\n    const p = String(r.postedDatetime || '');\n    if (!best.has(k) || p > best.get(k)._p) best.set(k, { ...r, _p: p });\n  }\n  for (const [k, r] of best) {\n    const day = k.slice(0, 10);\n    if (day <= today) put(k, actCol, r[actField]);   // 지난 시각 = 실적\n    if (day > today) put(k, fcCol, r[fcField]);      // 앞날 = 예보 (전일분이 마지막에 남는다)\n  }\n};\npickLatest('ERCOT Wind', 'genSystemWide', 'STWPFSystemWide', 'Wind', 'Wind_f');\npickLatest('ERCOT Solar', 'genSystemWide', 'STPPFSystemWide', 'Solar', 'Solar_f');\n\n// --- 부하 예보 (앞날만) ---\n{\n  const best = new Map();\n  for (const r of rows('ERCOT Load Forecast')) {\n    const k = key(r.deliveryDate, r.hourEnding);\n    if (k === null) continue;\n    const p = String(r.postedDatetime || '');\n    if (!best.has(k) || p > best.get(k)._p) best.set(k, { ...r, _p: p });\n  }\n  for (const [k, r] of best)\n    if (k.slice(0, 10) > today) put(k, 'Load_f', r.systemTotal);\n}\n\n// --- 시트 한 줄로 ---\n// 값이 없는 칸은 아예 내보내지 않는다. 빈 문자열로 내보내면 구글시트 노드가\n// 그 칸을 빈 값으로 덮어써서, 앞선 실행이 적어둔 값을 지운다.\n// 특히 지난 날짜가 되면 예보를 더 안 만드는데(위 규칙), 그때 빈 값이 나가면\n// 애써 지켜둔 '전일 예보' 가 통째로 지워진다.\nconst items = [];\nfor (const [k, v] of [...out.entries()].sort()) {\n  const row = { Timestamp: k.replace('T', ' ') + ':00:00' };\n  const set = (col, val) => { if (val !== null && val !== undefined && val !== '') row[col] = val; };\n  set('DAM', v.DAM);\n  set('RT_LZ', v.RT_LZ);\n  set('RT_HB', v.RT_HB);\n  set('Load', v.Load);\n  set('Load_f', v.Load_f);\n  set('Solar', v.Solar);\n  set('Solar_f', v.Solar_f);\n  set('Wind', v.Wind);\n  set('Wind_f', v.Wind_f);\n  // 순부하 = 부하 - 풍력 - 태양광. 학습데이터의 'ENV: Actual - Net Load' 자리에 들어간다.\n  // 셋이 다 모인 실행에서만 계산된다. 자료 도착이 어긋나도 매시 다시 돌므로 결국 채워진다.\n  if (v.Load != null && v.Wind != null && v.Solar != null)\n    row.NetLoad = Math.round((v.Load - v.Wind - v.Solar) * 100) / 100;\n  // Temp, PRC 는 ERCOT 공개 API 에 없다. 컬럼은 두되 쓰지 않는다.\n  //   Temp : 날씨 시트가 따로 담당한다\n  //   PRC  : 기본 OFF 인 M3 게이트 전용이라 없어도 모델이 돈다\n  if (Object.keys(row).length > 1) items.push({ json: row });\n}\nreturn items;\n"
+      },
+      "id": "shape",
+      "name": "Merge & Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        300
+      ],
+      "notes": "여섯 응답을 시간별 한 줄로 합친다. hourEnding(끝나는 시각) -> 시작 시각 변환 포함."
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1d1p7Y5V_uOShbkVqfDVjyEfjGGFcGGNZKHq5L8cbU24",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ercot_hourly",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "Timestamp"
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheet",
+      "name": "Sheets: ercot_hourly (upsert)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        120,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Timestamp 로 맞춰 덮어쓴다. 같은 시각이 두 줄 생기지 않는다."
+    }
+  ],
+  "connections": {
+    "매시 실행": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Token": {
+      "main": [
+        [
+          {
+            "node": "Date Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date Range": {
+      "main": [
+        [
+          {
+            "node": "ERCOT DAM (LZ_HOUSTON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT DAM (LZ_HOUSTON)": {
+      "main": [
+        [
+          {
+            "node": "ERCOT RT (LZ_HOUSTON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT RT (LZ_HOUSTON)": {
+      "main": [
+        [
+          {
+            "node": "ERCOT RT (HB_BUSAVG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT RT (HB_BUSAVG)": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Actual Load",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Actual Load": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Wind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Wind": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Solar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Solar": {
+      "main": [
+        [
+          {
+            "node": "ERCOT Load Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERCOT Load Forecast": {
+      "main": [
+        [
+          {
+            "node": "Merge & Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Shape": {
+      "main": [
+        [
+          {
+            "node": "Sheets: ercot_hourly (upsert)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

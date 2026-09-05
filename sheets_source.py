@@ -69,6 +69,8 @@ HIST_MAP = {
     "Wind":    "ERCOT - Generation - Wind - System Wide - ISO: Actual - Generation (5 min) - Latest (Now)",
     "Wind_f":  "ERCOT - Generation - Wind - System Wide - ISO: Forecast - Generation (STPF) - Prior Day (Rolling)",
     "PRC":     "ERCOT - Grid Conditions - System Wide - ISO: Actual - PRC - Latest (Now)",
+    # n8n_3 이 만드는 탭에는 부하 예보도 같이 들어온다. 그러면 demand 탭 없이도 자급된다.
+    "Load_f":  "ERCOT - Load - System Wide - ISO: Forecast - Load - Prior Day (Rolling)",
 }
 # demand 탭에서 가져오는 건 부하 예보 하나뿐. 풍력·태양광 예보는 Historical 탭에 이미 있고
 # 그쪽이 CSV 와 완전히 일치하므로 굳이 두 곳에서 가져오지 않는다.
@@ -212,11 +214,22 @@ def fetch_ercot(read):
         _log(f"demand 탭에서 시각/부하 컬럼을 못 찾음 (있는 컬럼: {cols})")
     else:
         d = pd.DataFrame({"_ts": _ts(dem[dcol]),
-                          FC_LOAD_COL: pd.to_numeric(dem[vcol], errors="coerce")})
+                          "_fc": pd.to_numeric(dem[vcol], errors="coerce")})
         d = d.dropna(subset=["_ts"]).drop_duplicates("_ts", keep="last")
         out = out.merge(d, on="_ts", how="left")
-        _log(f"부하 예보 {out[FC_LOAD_COL].notna().sum():,}/{len(out):,} 시간 결합"
-             f" ({vcol} @ demand 탭)")
+        # hist 탭이 이미 부하 예보를 갖고 있으면 그쪽이 우선이다. demand 탭은 빈 곳만 메운다.
+        # (hist 쪽은 '전일 발표분' 이라는 뜻이 분명한데, demand 탭은 어느 시점 예보인지
+        #  보장되지 않는다. 덮어쓰면 학습 때와 의미가 달라진다.)
+        if FC_LOAD_COL in out.columns:
+            filled = int(out[FC_LOAD_COL].isna().sum())
+            out[FC_LOAD_COL] = out[FC_LOAD_COL].combine_first(out["_fc"])
+            _log(f"부하 예보: hist 탭 우선, demand 탭이 빈 {filled:,}칸 중 "
+                 f"{int(out[FC_LOAD_COL].notna().sum()) - (len(out) - filled):,}칸을 메움")
+        else:
+            out[FC_LOAD_COL] = out["_fc"]
+            _log(f"부하 예보 {out[FC_LOAD_COL].notna().sum():,}/{len(out):,} 시간 결합"
+                 f" ({vcol} @ demand 탭)")
+        out = out.drop(columns=["_fc"])
 
     out = out.dropna(subset=["_ts"]).sort_values("_ts").drop(columns=["_ts"])
     return out

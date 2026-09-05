@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """워크플로 JSON 을 n8n 에 밀어넣는다 — 매번 손으로 import 하지 않기 위해.
 
-    python push_n8n.py                 두 워크플로를 n8n 에 반영
+    python push_n8n.py                 워크플로 전부를 n8n 에 반영
     python push_n8n.py --dry-run       뭐가 바뀌는지만 보고 아무것도 안 함
     python push_n8n.py --pull          반대 방향. n8n 에 있는 걸 로컬 파일로 가져온다
     python push_n8n.py --only 1        1번 워크플로만
@@ -54,7 +54,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # 이 파일을 지워서 n8n API 키를 날린 적이 있다(키는 발급 시 한 번만 보여준다).
 DEFAULT_CONF = os.path.join(HERE, "n8n_push.local.json")
 CONF = DEFAULT_CONF
-FILES = ["n8n_1_daily_predict.json", "n8n_2_backfill_lookback.json"]
+FILES = ["n8n_1_daily_predict.json", "n8n_2_backfill_lookback.json",
+         "n8n_3_ercot_hourly.json"]
 
 # n8n 이 PUT 본문에서 받아주는 키. 이것 말고 뭐라도 더 있으면 400 이 난다
 # ("request/body must NOT have additional properties"). id 는 URL 에만 넣는다.
@@ -564,7 +565,7 @@ def main():
     ap = argparse.ArgumentParser(description="워크플로 JSON 을 n8n 에 반영한다")
     ap.add_argument("--dry-run", action="store_true", help="바뀔 내용만 보여주고 끝낸다")
     ap.add_argument("--pull", action="store_true", help="반대 방향 — n8n → 로컬 파일")
-    ap.add_argument("--only", choices=["1", "2"], help="1번 또는 2번 워크플로만")
+    ap.add_argument("--only", choices=["1", "2", "3"], help="특정 워크플로만")
     ap.add_argument("--force", action="store_true",
                     help="비밀값을 못 찾아도 그냥 올린다 (워크플로가 멈출 수 있다)")
     ap.add_argument("--init-secrets", action="store_true",
