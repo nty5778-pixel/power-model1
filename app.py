@@ -14,6 +14,7 @@ Render 배포용 FastAPI 래퍼 — run_models_d1_d4_v4_weather.py 를 HTTP 로 
   * 학습 결과 캐시: 같은 날 두 번째 호출은 메모리 캐시 사용(콜드스타트 시 무효).
 """
 import os, sys, json, math, re, tempfile, datetime as dt
+import urllib.request
 from typing import Optional, List, Dict, Any
 
 import pandas as pd
@@ -245,6 +246,37 @@ def diag(x_api_key: Optional[str] = Header(None)):
                 tabs[key] = {"설정됨": True, "읽힘": True, "행": int(len(df)),
                              "컬럼앞부분": [str(c) for c in list(df.columns)[:8]]}
 
+    # 위에서 '빈 표' 로만 나오면 왜인지 알 수 없다. 주소를 직접 한 번 받아
+    # '무엇이 돌아왔는지'를 본다 — CSV 가 아니라 HTML 이 오는 경우가 대부분이다
+    # (평소 시트 주소(/edit)를 넣었거나, 게시 형식을 웹페이지로 골랐을 때).
+    probe = {}
+    for key, envname in sheets_source.URL_ENV.items():
+        u = os.environ.get(envname, "").strip()
+        if not u:
+            continue
+        info = {"주소형태": ("웹게시(/d/e/…pub) 맞음" if "/d/e/" in u and "pub" in u
+                          else "!! 평소 시트 주소(/edit) 로 보인다"
+                               if "/edit" in u else "판단 불가")}
+        info["output=csv 있음"] = "output=csv" in u
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": "power-model/1.0"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                head = r.read(400).decode("utf-8", "replace")
+                info["응답코드"] = r.status
+                info["콘텐츠형식"] = r.headers.get("Content-Type", "")
+        except Exception as e:
+            info["가져오기실패"] = _no_urls(e)[:150]
+            probe[key] = info
+            continue
+        low = head.lstrip().lower()
+        if low.startswith("<!doctype") or low.startswith("<html"):
+            info["받은것"] = "!! HTML 페이지 (CSV 가 아니다)"
+        else:
+            first = head.splitlines()[0] if head.splitlines() else ""
+            info["받은것"] = "CSV 로 보임"
+            info["첫줄앞부분"] = first[:120]
+        probe[key] = info
+
     panel_last = None
     if _cache.get("panel") is not None:
         try:
@@ -256,6 +288,7 @@ def diag(x_api_key: Optional[str] = Header(None)):
         "환경변수_설정여부": env,
         "선택된_읽기방식": mode or "없음 (CSV 만 사용)",
         "탭별_상태": tabs,
+        "주소_점검": probe,
         "학습데이터_마지막날": panel_last,
         "안내": ("환경변수를 넣었는데 '선택된_읽기방식'이 '없음'이면 Render 가 아직 "
                  "재배포되지 않았거나 이름이 다르다. 이름은 위 목록과 정확히 같아야 한다."),
