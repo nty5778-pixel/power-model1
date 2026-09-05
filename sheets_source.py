@@ -80,10 +80,26 @@ def _log(msg):
 
 
 # ---------------------------------------------------------------- 읽기 방식
+def _csv_url(u):
+    """웹 게시 주소를 CSV 형식으로 맞춘다.
+
+    '웹에 게시' 화면에서 형식 드롭다운을 '웹페이지' 인 채로 두기 쉽다. 그러면 주소가
+    .../pubhtml?gid=..&single=true 가 되고, 받아보면 표가 아니라 HTML 페이지가 온다.
+    실측으로 다섯 탭 전부 이 상태였고(Content-Type: text/html), 조용히 빈 표가 됐다.
+    사람에게 다시 게시하라고 하는 대신 여기서 형식만 바꿔 준다.
+    """
+    u = (u or "").strip()
+    if not u or "output=csv" in u:
+        return u
+    u = u.replace("/pubhtml", "/pub")
+    return u + ("&" if "?" in u else "?") + "output=csv"
+
+
 def _read_url(url):
     """웹 게시된 탭을 CSV 로 받는다. 인증 없음."""
     if not url:
         return None
+    url = _csv_url(url)
     df = pd.read_csv(url, dtype=str, keep_default_na=False)
     df.columns = [str(c).strip() for c in df.columns]
     return df.replace("", pd.NA)

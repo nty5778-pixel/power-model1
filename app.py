@@ -258,6 +258,9 @@ def diag(x_api_key: Optional[str] = Header(None)):
                           else "!! 평소 시트 주소(/edit) 로 보인다"
                                if "/edit" in u else "판단 불가")}
         info["output=csv 있음"] = "output=csv" in u
+        # 실제로 읽을 때와 같은 보정을 거친 주소로 확인한다
+        u = sheets_source._csv_url(u)
+        info["보정후 csv"] = "output=csv" in u
         try:
             req = urllib.request.Request(u, headers={"User-Agent": "power-model/1.0"})
             with urllib.request.urlopen(req, timeout=20) as r:
