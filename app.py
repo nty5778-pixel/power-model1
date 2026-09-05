@@ -243,8 +243,19 @@ def diag(x_api_key: Optional[str] = Header(None)):
                 tabs[key] = {"설정됨": True, "읽힘": False,
                              "오류": "빈 표가 왔다 (게시 형식이 CSV 인지, 탭이 맞는지 확인)"}
             else:
-                tabs[key] = {"설정됨": True, "읽힘": True, "행": int(len(df)),
-                             "컬럼앞부분": [str(c) for c in list(df.columns)[:8]]}
+                info2 = {"설정됨": True, "읽힘": True, "행": int(len(df)),
+                         "컬럼전체": [str(c) for c in df.columns]}
+                # 날짜처럼 보이는 첫 컬럼의 범위 — 시트가 어디까지 채워졌는지 본다
+                dcol = next((c for c in df.columns
+                             if any(t in str(c).lower()
+                                    for t in ("datetime", "timestamp", "date"))), None)
+                if dcol is not None:
+                    ser = pd.to_datetime(df[dcol].astype(str).str.replace(
+                        r"[+-]\d{2}:\d{2}$", "", regex=True), errors="coerce").dropna()
+                    if len(ser):
+                        info2["날짜컬럼"] = str(dcol)
+                        info2["날짜범위"] = [str(ser.min()), str(ser.max())]
+                tabs[key] = info2
 
     # 위에서 '빈 표' 로만 나오면 왜인지 알 수 없다. 주소를 직접 한 번 받아
     # '무엇이 돌아왔는지'를 본다 — CSV 가 아니라 HTML 이 오는 경우가 대부분이다
