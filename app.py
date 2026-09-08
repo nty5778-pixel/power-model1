@@ -321,6 +321,19 @@ def diag(x_api_key: Optional[str] = Header(None)):
     except Exception as e:
         ercot_check = {"확인실패": _no_urls(e)[:200]}
 
+    # data/ 안의 파일이 실제로 어떻게 판정되는지. 보충 CSV 를 넣었는데도 학습
+    # 데이터가 안 늘어나서, 파일이 배포에 없는지 판정에서 걸리는지 구분이 안 됐다.
+    files = []
+    try:
+        for f in M.list_csvs(DATA_DIR):
+            ok, miss = M.is_ercot_history(f)
+            files.append({"파일": os.path.basename(f),
+                          "크기": os.path.getsize(f),
+                          "과거데이터로_인정": bool(ok),
+                          "빠진항목": list(miss)})
+    except Exception as e:
+        files = [{"확인실패": _no_urls(e)[:200]}]
+
     panel_last = None
     if _cache.get("panel") is not None:
         try:
@@ -334,6 +347,7 @@ def diag(x_api_key: Optional[str] = Header(None)):
         "탭별_상태": tabs,
         "주소_점검": probe,
         "ERCOT_데이터_판정": ercot_check,
+        "data폴더_파일들": files,
         "학습데이터_마지막날": panel_last,
         "안내": ("환경변수를 넣었는데 '선택된_읽기방식'이 '없음'이면 Render 가 아직 "
                  "재배포되지 않았거나 이름이 다르다. 이름은 위 목록과 정확히 같아야 한다."),
