@@ -184,7 +184,7 @@ def _ts(s):
     """타임스탬프 정규화. CSV 와 같은 규칙으로 tz 오프셋을 떼고 wall-clock 으로 읽는다
     (DST 때문에 파일마다 -06:00/-05:00 이 섞여 있어 UTC 변환하면 시간대별 분석이 어긋난다)."""
     return pd.to_datetime(s.astype(str).str.replace(r"[+-]\d{2}:\d{2}$", "", regex=True),
-                          errors="coerce")
+                          errors="coerce", format="mixed")
 
 
 # ---------------------------------------------------------------- ERCOT

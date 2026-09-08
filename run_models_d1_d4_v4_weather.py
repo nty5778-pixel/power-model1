@@ -265,8 +265,13 @@ def load_history(ercot_files, gas, netload="env", verbose=True):
         d = pd.read_csv(f); d.columns = [c.replace("\ufeff", "") for c in d.columns]
         parts.append(d)
     raw = pd.concat(parts, ignore_index=True)
-    raw["ts"] = pd.to_datetime(raw["Timestamp"].str.replace(r"[+-]\d{2}:\d{2}$", "", regex=True),
-                               errors="coerce")
+    # format="mixed" 가 없으면 pandas 2.x 는 첫 행의 형식('2024-01-01T00:00:00')을 전체에
+    # 강제해서, 형식이 다른 행('2026-06-25 00:00:00', 시트의 '2026-09-05 0:00:00')을
+    # 조용히 NaT 로 만든다 → 바로 아래 dropna 에서 사라진다. 실측: 보충 CSV 1,728행과
+    # 시트 374행이 파일로는 '인정' 되면서도 패널에서는 통째로 증발했다(21,741행 고정).
+    raw["ts"] = pd.to_datetime(raw["Timestamp"].astype(str)
+                                   .str.replace(r"[+-]\d{2}:\d{2}$", "", regex=True),
+                               errors="coerce", format="mixed")
     # 정렬은 반드시 안정 정렬(mergesort). 서머타임 종료일(예: 2025-11-02)은 01시가 두 번
     # 있어 tz 오프셋을 뗀 뒤 타임스탬프가 중복되는데, 불안정 정렬이면 둘 중 어느 값이
     # 남을지 실행마다 달라진다(실측: 그날 DA 일평균이 $31.78 <-> $31.84 로 흔들렸다).
