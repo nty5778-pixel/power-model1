@@ -191,18 +191,28 @@ def _ts(s):
 def fetch_ercot(read):
     """Historical data 탭(실적 10종) + demand 탭(부하 예보) → CSV 모양 DataFrame."""
     hist = read("hist")
-    if hist is None or hist.empty or "Timestamp" not in hist.columns:
-        _log("Historical data 를 못 읽었거나 Timestamp 컬럼이 없다")
+    if hist is None or hist.empty:
+        _log("hist 탭을 못 읽었다 (주소/게시 상태 확인)")
         return None
 
-    out = pd.DataFrame({"Timestamp": hist["Timestamp"]})
-    out["_ts"] = _ts(hist["Timestamp"])
+    # 시각 컬럼 이름은 탭마다 다르다. Timestamp 만 찾다가 DateTime 인 탭에서
+    # 통째로 포기한 적이 있다(로그에 'Timestamp 컬럼이 없다' 만 나와 원인이 안 보였다).
+    tcol = next((c for c in ("Timestamp", "DateTime", "datetime", "timestamp")
+                 if c in hist.columns), None)
+    if tcol is None:
+        _log(f"hist 탭에 시각 컬럼이 없다. 있는 컬럼: {list(hist.columns)[:12]}")
+        return None
+    if tcol != "Timestamp":
+        _log(f"hist 탭의 시각 컬럼으로 '{tcol}' 을 쓴다")
+
+    out = pd.DataFrame({"Timestamp": hist[tcol]})
+    out["_ts"] = _ts(hist[tcol])
     missing = [s for s in HIST_MAP if s not in hist.columns]
     for src, dst in HIST_MAP.items():
         if src in hist.columns:
             out[dst] = pd.to_numeric(hist[src], errors="coerce")
     if missing:
-        _log(f"Historical 탭에 없는 컬럼: {missing}")
+        _log(f"hist 탭에 없는 컬럼: {missing}")
 
     dem = read("demand")
     dcol = vcol = None
