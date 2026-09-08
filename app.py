@@ -110,6 +110,11 @@ def _build_panel():
 
     if not ercot_files:
         raise HTTPException(500, "no ERCOT history (CSV/시트 어디에도 필요 컬럼이 없다)")
+    # 무엇을 학습에 넣는지 남긴다. /diag 는 '인정' 이라는데 패널 행수는 안 늘어나는
+    # 상황이 있었고, 밖에서는 둘 중 어디가 틀렸는지 구분할 수 없었다.
+    print("[panel] 학습에 쓰는 파일 " + str(len(ercot_files)) + "개: "
+          + ", ".join(os.path.basename(f) for f in ercot_files),
+          file=sys.stderr, flush=True)
     wx = M.load_weather(wx_files)
 
     mn, gas_df = M.load_history(ercot_files, gas)
