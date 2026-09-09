@@ -550,7 +550,12 @@ def regime_from_last(d):
     (예전에 run() 은 낡은 값, app.py 는 올바른 값을 써서 같은 데이터로 다른 배분이 나왔다.)
     반환: forecast_rows() 가 기대하는 regime dict
     """
-    last = d.dropna(subset=["da_med"]).iloc[-1]
+    # D0 는 '그 날 실측이 다 있는 마지막 날' 이어야 한다. 시트로 들어오는 최근 며칠은
+    # 가격은 있는데 순부하가 아직 비어 있는 식으로 반쯤만 차 있고, 그런 날을 D0 로
+    # 잡으면 basis/nfe 가 NaN 인 채로 regime 이 만들어진다. basis_mean(RT 필요)과
+    # nfe(순부하 필요)가 있는 날까지만 본다. 벤더 CSV 만 있을 땐 모든 날이 완전해서
+    # 결과가 바뀌지 않는다. prc 는 선택 항목이라 여기서 요구하지 않는다.
+    last = d.dropna(subset=["da_med", "basis_mean", "nfe"]).iloc[-1]
     f = lambda c: float(last[c])
     return dict(prc_low_r7=f("prc_low_r7"), da_med=f("da_med"),
                 basis_lag1=f("basis_mean"), basis_r7=f("basis_r7"),
@@ -612,7 +617,9 @@ def forecast_rows(fc, models, reg, volume_mw, use_gate=False,
             horizon=f"D+{h}", date=r["date"].date(), alloc_mode=alloc,
             M1_P_DA_cheaper=round(v1, 3),
             M2_DA_pred_USD=round(m2, 2), M2_expensive=bool(m2 > damed * 1.15),
-            M3_prc_low_r7_MW=round(prc7, 0), M3_gate_signal=bool(gate),
+            # PRC 는 선택 항목 — 없으면(NaN) None 으로. round(NaN) 은 NaN 이라 JSON 에서 터진다
+            M3_prc_low_r7_MW=(round(prc7, 0) if np.isfinite(prc7) else None),
+            M3_gate_signal=bool(gate),
             M3_gate_applied=bool(gate_applied),
             M3_gate_reason=("+".join(reason) if gate else "-"),
             M4_premium_prob=round(m4, 3),

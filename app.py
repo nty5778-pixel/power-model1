@@ -183,7 +183,7 @@ def predict(req: PredictRequest, x_api_key: Optional[str] = Header(None)):
     # 예보일과의 간격을 그대로 노출해 조용히 낡아가는 것을 막는다.
     d0_gap = int((pd.to_datetime(fc["date"]).min().normalize()
                   - pd.Timestamp(d0_ts).normalize()).days)
-    return {
+    return _clean({
         "run_id": req.run_id or dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
         "generated_at": dt.datetime.utcnow().isoformat(),
         "model_version": "v4-weather",
@@ -195,7 +195,7 @@ def predict(req: PredictRequest, x_api_key: Optional[str] = Header(None)):
         "regime": {"prc_low_r7": reg["prc_low_r7"], "da_med": reg["da_med"]},
         "weather_missing_days": n_missing_wx,   # >0 이면 그 날은 날씨 피처·오버레이 없이 산출됨
         "rows": rows,
-    }
+    })
 
 
 class ScoreRow(BaseModel):
@@ -357,6 +357,27 @@ def diag(x_api_key: Optional[str] = Header(None)):
         "안내": ("환경변수를 넣었는데 '선택된_읽기방식'이 '없음'이면 Render 가 아직 "
                  "재배포되지 않았거나 이름이 다르다. 이름은 위 목록과 정확히 같아야 한다."),
     }
+
+
+def _clean(o):
+    """응답 안의 NaN/무한대를 null 로 바꾼다 (중첩 dict/list 포함).
+
+    JSON 은 NaN 을 표현할 수 없어 하나라도 섞이면 응답 전체가 500 으로 죽는다.
+    최근 날짜엔 PRC 가 없어(ERCOT 공개 API 미제공) prc_low_r7 이 NaN 인 게 정상인데,
+    그 값이 regime 에 실려 /predict 가 통째로 실패했다. '없음' 은 null 로 보낸다.
+    """
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_clean(v) for v in o]
+    if isinstance(o, float) and not math.isfinite(o):
+        return None
+    try:                                   # numpy 스칼라
+        if hasattr(o, "item"):
+            return _clean(o.item())
+    except Exception:
+        pass
+    return o
 
 
 def _r(v, nd=3):
