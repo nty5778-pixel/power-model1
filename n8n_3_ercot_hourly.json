@@ -501,7 +501,9 @@
             "Timestamp"
           ]
         },
-        "options": {}
+        "options": {
+          "cellFormat": "RAW"
+        }
       },
       "id": "sheet",
       "name": "Sheets: ercot_hourly (upsert)",
@@ -514,7 +516,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "notes": "Timestamp 로 맞춰 덮어쓴다. 같은 시각이 두 줄 생기지 않는다."
+      "notes": "Timestamp 로 맞춰 덮어쓴다. cellFormat=RAW('Let n8n format') 가 없으면 구글시트가 시각을 날짜 셀로 바꿔 '00:00:00'→'0:00:00' 이 되고, 대조가 어긋나 매시 새 행이 붙는다(실측: 하루 74행). RAW 면 글자 그대로 저장돼 대조가 맞는다."
     }
   ],
   "connections": {
